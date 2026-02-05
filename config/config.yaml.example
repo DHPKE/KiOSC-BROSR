@@ -1,0 +1,15 @@
+start_url: "https://example.com"
+debug_port: 9222
+autostart: true
+osc_bind: "0.0.0.0"
+osc_port: 9000
+udp_text_bind: "0.0.0.0"
+udp_text_port: 9100
+web_bind: "127.0.0.1"
+web_port: 8080
+web_user: "admin"
+web_pass: "changeme"
+chrome_cmd_template: "chromium --no-first-run --disable-infobars --kiosk --start-maximized --remote-debugging-port={debug} '{url}'"
+reset_time: 3600
+hmac_secret: ""
+allowed_ips: []

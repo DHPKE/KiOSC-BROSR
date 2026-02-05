@@ -1,0 +1,15 @@
+[Unit]
+Description=KiOSC-BrowsR WebAdmin
+After=network.target
+
+[Service]
+User=kiosk
+Group=kiosk
+Environment=PATH=/opt/kiosc-browsr/venv/bin:/usr/bin:/bin
+WorkingDirectory=/opt/kiosc-browsr/app
+ExecStart=/opt/kiosc-browsr/venv/bin/python /opt/kiosc-browsr/app/webadmin.py
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

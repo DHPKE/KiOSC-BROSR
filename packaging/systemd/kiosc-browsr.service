@@ -1,0 +1,16 @@
+[Unit]
+Description=KiOSC-BrowsR OSC/UDP Text Controller + Chromium Launcher
+After=network.target
+
+[Service]
+User=kiosk
+Group=kiosk
+Environment=PATH=/opt/kiosc-browsr/venv/bin:/usr/bin:/bin
+WorkingDirectory=/opt/kiosc-browsr/app
+ExecStart=/opt/kiosc-browsr/venv/bin/python /opt/kiosc-browsr/app/kiosc_browsr.py
+Restart=always
+RestartSec=2
+LimitNOFILE=8192
+
+[Install]
+WantedBy=multi-user.target
