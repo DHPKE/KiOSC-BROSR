@@ -1,356 +1,331 @@
 #!/usr/bin/env python3
-"""KiOSC-BrowsR main service implementation"""
+"""KiOSC-BrowsR Service - Browser remote control for kiosk systems"""
 
-import os
-import sys
-import time
-import hmac
-import hashlib
-import socket
-import subprocess
-import threading
-import signal
-import yaml
-import logging
+import os, sys, time, hmac, hashlib, socket, subprocess, threading, signal, yaml, logging
 from pythonosc.dispatcher import Dispatcher
 from pythonosc.osc_server import ThreadingOSCUDPServer
 import pychrome
 
-# Setup logging
+# Logging
 logger = logging.getLogger('kiosc')
 logger.setLevel(logging.INFO)
 fh = logging.FileHandler('/var/log/kiosc-browsr.log')
 ch = logging.StreamHandler(sys.stdout)
-formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s')
-fh.setFormatter(formatter)
-ch.setFormatter(formatter)
+fmt = logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s')
+fh.setFormatter(fmt)
+ch.setFormatter(fmt)
 logger.addHandler(fh)
 logger.addHandler(ch)
 
-# Global state
-config = {}
-chrome_proc = None
-chrome_browser = None
-chrome_tab = None
-reset_timer_obj = None
-running = True
-osc_srv = None
-udp_sock = None
+# State
+state = {
+    'config': {},
+    'chrome_process': None,
+    'chrome_browser': None,
+    'chrome_tab': None,
+    'reset_timer': None,
+    'running': True,
+    'osc_server': None,
+    'udp_socket': None
+}
 
 
-def load_config(path):
-    """Load YAML config"""
-    global config
+def read_yaml_config(path):
+    """Read configuration from YAML file"""
     try:
         with open(path) as f:
-            config = yaml.safe_load(f)
-        logger.info(f"Config loaded from {path}")
+            state['config'] = yaml.safe_load(f)
+        logger.info(f"Loaded config: {path}")
     except:
-        config = {
-            'start_url': 'https://example.com',
-            'debug_port': 9222,
-            'autostart': True,
-            'osc_bind': '0.0.0.0',
-            'osc_port': 9000,
-            'udp_text_bind': '0.0.0.0',
-            'udp_text_port': 9100,
-            'chrome_cmd_template': "chromium --no-first-run --disable-infobars --kiosk --start-maximized --remote-debugging-port={debug} '{url}'",
-            'reset_time': 3600,
-            'hmac_secret': '',
-            'allowed_ips': []
+        state['config'] = {
+            'start_url': 'https://example.com', 'debug_port': 9222, 'autostart': True,
+            'osc_bind': '0.0.0.0', 'osc_port': 9000, 'udp_text_bind': '0.0.0.0',
+            'udp_text_port': 9100, 'reset_time': 3600, 'hmac_secret': '', 'allowed_ips': [],
+            'chrome_cmd_template': "chromium --no-first-run --disable-infobars --kiosk --start-maximized --remote-debugging-port={debug} '{url}'"
         }
-        logger.warning("Using default config")
+        logger.warning("Using defaults")
 
 
-def check_ip(ip):
-    """Check if IP is allowed"""
-    allowed = config.get('allowed_ips', [])
-    return not allowed or ip in allowed
+def validate_client_ip(ip):
+    """Check if IP is in whitelist"""
+    whitelist = state['config'].get('allowed_ips', [])
+    return not whitelist or ip in whitelist
 
 
-def check_hmac(msg, sig):
+def validate_hmac_auth(message, signature):
     """Verify HMAC signature"""
-    secret = config.get('hmac_secret', '')
+    secret = state['config'].get('hmac_secret', '')
     if not secret:
         return True
-    calc = hmac.new(secret.encode(), msg.encode(), hashlib.sha256).hexdigest()
-    return hmac.compare_digest(calc, sig)
+    computed = hmac.new(secret.encode(), message.encode(), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(computed, signature)
 
 
-def start_watchdog():
-    """Start systemd watchdog thread"""
-    usec = os.environ.get('WATCHDOG_USEC')
-    if not usec:
+def init_watchdog_thread():
+    """Initialize systemd watchdog"""
+    watchdog_usec = os.environ.get('WATCHDOG_USEC')
+    if not watchdog_usec:
         return
-    interval = int(usec) / 2000000.0
     
-    def ping():
-        while running:
+    interval_seconds = int(watchdog_usec) / 2000000.0
+    
+    def watchdog_loop():
+        while state['running']:
             try:
-                s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-                s.sendto(b'WATCHDOG=1', os.environ.get('NOTIFY_SOCKET', ''))
-                s.close()
+                sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+                sock.sendto(b'WATCHDOG=1', os.environ.get('NOTIFY_SOCKET', ''))
+                sock.close()
             except:
                 pass
-            time.sleep(interval)
+            time.sleep(interval_seconds)
     
-    threading.Thread(target=ping, daemon=True).start()
-    logger.info(f"Watchdog started: {interval}s")
+    threading.Thread(target=watchdog_loop, daemon=True).start()
+    logger.info(f"Watchdog: {interval_seconds}s")
 
 
-def start_browser(url=None):
-    """Start Chrome browser"""
-    global chrome_proc, chrome_browser, chrome_tab
-    
-    if chrome_proc:
-        logger.warning("Browser already running")
+def launch_chrome(target_url=None):
+    """Launch Chrome browser process"""
+    if state['chrome_process']:
+        logger.warning("Chrome already running")
         return
     
-    url = url or config.get('start_url')
-    cmd = config.get('chrome_cmd_template').format(
-        debug=config.get('debug_port', 9222),
+    url = target_url or state['config'].get('start_url')
+    cmd = state['config'].get('chrome_cmd_template').format(
+        debug=state['config'].get('debug_port', 9222),
         url=url
     )
     
-    logger.info(f"Starting browser: {cmd}")
-    chrome_proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    logger.info(f"Launching: {cmd}")
+    state['chrome_process'] = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     time.sleep(3)
     
     try:
-        chrome_browser = pychrome.Browser(url=f"http://127.0.0.1:{config.get('debug_port', 9222)}")
-        tabs = chrome_browser.list_tab()
+        state['chrome_browser'] = pychrome.Browser(url=f"http://127.0.0.1:{state['config'].get('debug_port', 9222)}")
+        tabs = state['chrome_browser'].list_tab()
         if tabs:
-            chrome_tab = tabs[0]
-            chrome_tab.start()
-            logger.info("Browser connected")
-            start_reset_timer()
+            state['chrome_tab'] = tabs[0]
+            state['chrome_tab'].start()
+            logger.info("Chrome connected")
+            schedule_auto_reset()
     except Exception as e:
-        logger.error(f"Failed to connect: {e}")
+        logger.error(f"Connection error: {e}")
 
 
-def stop_browser():
-    """Stop Chrome browser"""
-    global chrome_proc, chrome_browser, chrome_tab, reset_timer_obj
+def terminate_chrome():
+    """Terminate Chrome browser"""
+    if state['reset_timer']:
+        state['reset_timer'].cancel()
+        state['reset_timer'] = None
     
-    if reset_timer_obj:
-        reset_timer_obj.cancel()
-        reset_timer_obj = None
-    
-    if chrome_tab:
+    if state['chrome_tab']:
         try:
-            chrome_tab.stop()
+            state['chrome_tab'].stop()
         except:
             pass
-        chrome_tab = None
+        state['chrome_tab'] = None
     
-    chrome_browser = None
+    state['chrome_browser'] = None
     
-    if chrome_proc:
+    if state['chrome_process']:
         try:
-            chrome_proc.terminate()
-            chrome_proc.wait(timeout=5)
+            state['chrome_process'].terminate()
+            state['chrome_process'].wait(timeout=5)
         except:
-            chrome_proc.kill()
-        chrome_proc = None
+            state['chrome_process'].kill()
+        state['chrome_process'] = None
     
-    logger.info("Browser stopped")
+    logger.info("Chrome terminated")
 
 
-def navigate(url):
+def goto_url(url):
     """Navigate to URL"""
-    if chrome_tab:
+    if state['chrome_tab']:
         try:
-            chrome_tab.call_method("Page.navigate", url=url, _timeout=5)
-            logger.info(f"Navigated to {url}")
-            start_reset_timer()
+            state['chrome_tab'].call_method("Page.navigate", url=url, _timeout=5)
+            logger.info(f"Navigated: {url}")
+            schedule_auto_reset()
         except Exception as e:
-            logger.error(f"Navigate failed: {e}")
+            logger.error(f"Nav error: {e}")
 
 
-def reload():
-    """Reload page"""
-    if chrome_tab:
+def refresh_page():
+    """Reload current page"""
+    if state['chrome_tab']:
         try:
-            chrome_tab.call_method("Page.reload", _timeout=5)
-            logger.info("Page reloaded")
-            start_reset_timer()
+            state['chrome_tab'].call_method("Page.reload", _timeout=5)
+            logger.info("Reloaded")
+            schedule_auto_reset()
         except Exception as e:
-            logger.error(f"Reload failed: {e}")
+            logger.error(f"Reload error: {e}")
 
 
-def clear():
-    """Clear cache"""
-    if chrome_tab:
+def purge_browser_data():
+    """Clear cache and cookies"""
+    if state['chrome_tab']:
         try:
-            chrome_tab.call_method("Network.clearBrowserCache", _timeout=5)
-            chrome_tab.call_method("Network.clearBrowserCookies", _timeout=5)
-            logger.info("Cache cleared")
+            state['chrome_tab'].call_method("Network.clearBrowserCache", _timeout=5)
+            state['chrome_tab'].call_method("Network.clearBrowserCookies", _timeout=5)
+            logger.info("Data cleared")
         except Exception as e:
-            logger.error(f"Clear failed: {e}")
+            logger.error(f"Clear error: {e}")
 
 
-def get_status():
-    """Get status"""
+def query_status():
+    """Get current status"""
     return {
-        'running': chrome_proc is not None,
-        'pid': chrome_proc.pid if chrome_proc else None,
-        'url': config.get('start_url'),
-        'reset_time': config.get('reset_time')
+        'active': state['chrome_process'] is not None,
+        'pid': state['chrome_process'].pid if state['chrome_process'] else None,
+        'home': state['config'].get('start_url'),
+        'reset_interval': state['config'].get('reset_time')
     }
 
 
-def start_reset_timer():
-    """Start auto-reset timer"""
-    global reset_timer_obj
+def schedule_auto_reset():
+    """Schedule automatic reset timer"""
+    if state['reset_timer']:
+        state['reset_timer'].cancel()
     
-    if reset_timer_obj:
-        reset_timer_obj.cancel()
-    
-    reset_time = config.get('reset_time', 0)
-    if reset_time > 0:
-        def reset():
-            logger.info("Auto-reset triggered")
-            navigate(config.get('start_url'))
+    interval = state['config'].get('reset_time', 0)
+    if interval > 0:
+        def execute_reset():
+            logger.info("Auto-reset")
+            goto_url(state['config'].get('start_url'))
         
-        reset_timer_obj = threading.Timer(reset_time, reset)
-        reset_timer_obj.start()
-        logger.info(f"Reset timer: {reset_time}s")
+        state['reset_timer'] = threading.Timer(interval, execute_reset)
+        state['reset_timer'].start()
+        logger.info(f"Reset timer: {interval}s")
 
 
-def handle_cmd(cmd, params):
-    """Handle command"""
-    logger.info(f"Command: {cmd} {params}")
+def dispatch_command(cmd_name, cmd_params):
+    """Dispatch command to appropriate handler"""
+    logger.info(f"Cmd: {cmd_name} {cmd_params}")
     
-    if cmd == 'start':
-        start_browser(params.get('url'))
-    elif cmd == 'stop':
-        stop_browser()
-    elif cmd == 'restart':
-        stop_browser()
+    if cmd_name == 'start':
+        launch_chrome(cmd_params.get('url'))
+    elif cmd_name == 'stop':
+        terminate_chrome()
+    elif cmd_name == 'restart':
+        terminate_chrome()
         time.sleep(1)
-        start_browser(params.get('url'))
-    elif cmd == 'reload':
-        reload()
-    elif cmd == 'goto':
-        if params.get('url'):
-            navigate(params['url'])
-    elif cmd == 'clear':
-        clear()
-    elif cmd == 'status':
-        logger.info(f"Status: {get_status()}")
-    elif cmd == 'set_reset_time':
-        config['reset_time'] = int(params.get('seconds', 0))
-        start_reset_timer()
+        launch_chrome(cmd_params.get('url'))
+    elif cmd_name == 'reload':
+        refresh_page()
+    elif cmd_name == 'goto':
+        if cmd_params.get('url'):
+            goto_url(cmd_params['url'])
+    elif cmd_name == 'clear':
+        purge_browser_data()
+    elif cmd_name == 'status':
+        logger.info(f"Status: {query_status()}")
+    elif cmd_name == 'set_reset_time':
+        state['config']['reset_time'] = int(cmd_params.get('seconds', 0))
+        schedule_auto_reset()
 
 
-def start_osc():
-    """Start OSC server"""
-    global osc_srv
-    
+def init_osc_protocol():
+    """Initialize OSC protocol server"""
     disp = Dispatcher()
-    disp.map("/start", lambda a, *args: handle_cmd('start', {'url': args[0] if args else None}))
-    disp.map("/stop", lambda a, *args: handle_cmd('stop', {}))
-    disp.map("/restart", lambda a, *args: handle_cmd('restart', {'url': args[0] if args else None}))
-    disp.map("/reload", lambda a, *args: handle_cmd('reload', {}))
-    disp.map("/goto", lambda a, url: handle_cmd('goto', {'url': url}))
-    disp.map("/set_reset_time", lambda a, s: handle_cmd('set_reset_time', {'seconds': s}))
-    disp.map("/clear", lambda a, *args: handle_cmd('clear', {}))
-    disp.map("/status", lambda a, *args: handle_cmd('status', {}))
+    disp.map("/start", lambda a, *args: dispatch_command('start', {'url': args[0] if args else None}))
+    disp.map("/stop", lambda a, *args: dispatch_command('stop', {}))
+    disp.map("/restart", lambda a, *args: dispatch_command('restart', {'url': args[0] if args else None}))
+    disp.map("/reload", lambda a, *args: dispatch_command('reload', {}))
+    disp.map("/goto", lambda a, url: dispatch_command('goto', {'url': url}))
+    disp.map("/set_reset_time", lambda a, s: dispatch_command('set_reset_time', {'seconds': s}))
+    disp.map("/clear", lambda a, *args: dispatch_command('clear', {}))
+    disp.map("/status", lambda a, *args: dispatch_command('status', {}))
     
-    osc_srv = ThreadingOSCUDPServer(
-        (config.get('osc_bind', '0.0.0.0'), config.get('osc_port', 9000)),
+    state['osc_server'] = ThreadingOSCUDPServer(
+        (state['config'].get('osc_bind', '0.0.0.0'), state['config'].get('osc_port', 9000)),
         disp
     )
-    threading.Thread(target=osc_srv.serve_forever, daemon=True).start()
-    logger.info(f"OSC: {config.get('osc_bind')}:{config.get('osc_port')}")
+    threading.Thread(target=state['osc_server'].serve_forever, daemon=True).start()
+    logger.info(f"OSC server: {state['config'].get('osc_bind')}:{state['config'].get('osc_port')}")
 
 
-def start_udp():
-    """Start UDP server"""
-    global udp_sock
+def init_udp_protocol():
+    """Initialize UDP plaintext server"""
+    state['udp_socket'] = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    state['udp_socket'].setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    state['udp_socket'].bind((
+        state['config'].get('udp_text_bind', '0.0.0.0'),
+        state['config'].get('udp_text_port', 9100)
+    ))
     
-    udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    udp_sock.bind((config.get('udp_text_bind', '0.0.0.0'), config.get('udp_text_port', 9100)))
-    
-    def recv():
-        while running:
+    def udp_receiver_loop():
+        while state['running']:
             try:
-                data, addr = udp_sock.recvfrom(4096)
-                ip = addr[0]
+                packet, sender = state['udp_socket'].recvfrom(4096)
+                sender_ip = sender[0]
                 
-                if not check_ip(ip):
-                    logger.warning(f"Blocked {ip}")
+                if not validate_client_ip(sender_ip):
+                    logger.warning(f"Blocked: {sender_ip}")
                     continue
                 
-                msg = data.decode('utf-8').strip()
-                parts = msg.split()
-                if not parts:
+                message = packet.decode('utf-8').strip()
+                tokens = message.split()
+                if not tokens:
                     continue
                 
-                cmd = parts[0]
-                args = parts[1:]
+                verb = tokens[0]
+                arguments = tokens[1:]
                 
-                if config.get('hmac_secret') and args:
-                    sig = args[-1]
-                    payload = ' '.join([cmd] + args[:-1])
-                    if not check_hmac(payload, sig):
-                        logger.warning(f"Bad HMAC from {ip}")
+                if state['config'].get('hmac_secret') and arguments:
+                    signature = arguments[-1]
+                    plaintext = ' '.join([verb] + arguments[:-1])
+                    if not validate_hmac_auth(plaintext, signature):
+                        logger.warning(f"HMAC fail: {sender_ip}")
                         continue
-                    args = args[:-1]
+                    arguments = arguments[:-1]
                 
                 params = {}
-                if cmd in ['start', 'restart', 'goto']:
-                    params['url'] = args[0] if args else None
+                if verb in ['start', 'restart', 'goto']:
+                    params['url'] = arguments[0] if arguments else None
                 
-                handle_cmd(cmd, params)
+                dispatch_command(verb, params)
             except Exception as e:
-                if running:
+                if state['running']:
                     logger.error(f"UDP error: {e}")
     
-    threading.Thread(target=recv, daemon=True).start()
-    logger.info(f"UDP: {config.get('udp_text_bind')}:{config.get('udp_text_port')}")
+    threading.Thread(target=udp_receiver_loop, daemon=True).start()
+    logger.info(f"UDP server: {state['config'].get('udp_text_bind')}:{state['config'].get('udp_text_port')}")
 
 
-def sig_handler(signum, frame):
-    """Signal handler"""
-    global running
-    logger.info(f"Signal {signum}")
-    running = False
+def handle_signal(signum, frame):
+    """Handle termination signal"""
+    logger.info(f"Signal: {signum}")
+    state['running'] = False
 
 
 def main():
     """Main entry point"""
-    global running
+    config_file = os.environ.get('KIOSC_CONFIG', '/etc/kiosc-browsr/config.yaml')
+    read_yaml_config(config_file)
     
-    cfg_path = os.environ.get('KIOSC_CONFIG', '/etc/kiosc-browsr/config.yaml')
-    load_config(cfg_path)
+    init_watchdog_thread()
+    init_osc_protocol()
+    init_udp_protocol()
     
-    start_watchdog()
-    start_osc()
-    start_udp()
+    signal.signal(signal.SIGTERM, handle_signal)
+    signal.signal(signal.SIGINT, handle_signal)
     
-    signal.signal(signal.SIGTERM, sig_handler)
-    signal.signal(signal.SIGINT, sig_handler)
+    if state['config'].get('autostart', True):
+        launch_chrome()
     
-    if config.get('autostart', True):
-        start_browser()
-    
-    logger.info("Service running")
+    logger.info("Service active")
     
     try:
-        while running:
+        while state['running']:
             time.sleep(1)
     except KeyboardInterrupt:
         pass
     
-    logger.info("Shutting down")
-    stop_browser()
-    if osc_srv:
-        osc_srv.shutdown()
-    if udp_sock:
-        udp_sock.close()
-    logger.info("Stopped")
+    logger.info("Shutdown")
+    terminate_chrome()
+    if state['osc_server']:
+        state['osc_server'].shutdown()
+    if state['udp_socket']:
+        state['udp_socket'].close()
+    logger.info("Exit")
 
 
 if __name__ == '__main__':
