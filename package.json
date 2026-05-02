@@ -1,6 +1,6 @@
 {
   "name": "kiosc-browsr",
-  "version": "2.2.2",
+  "version": "2.2.3",
   "description": "OSC/UDP-controlled browser kiosk — Electron (Linux / macOS / Windows)",
   "author": {
     "name": "DHPKE",
