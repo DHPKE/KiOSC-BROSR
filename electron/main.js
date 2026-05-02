@@ -26,9 +26,13 @@ const DEFAULTS = {
   reset_time:     3600,
   hmac_secret:    '',
   allowed_ips:    [],
-  kiosk:          true,
-  mdns_name:      os.hostname(),
-  autostart:      true
+  kiosk:            true,
+  mdns_name:        os.hostname(),
+  autostart:        true,
+  hide_cursor:      false,
+  disable_touch:    false,
+  disable_keyboard: false,
+  test_mode:        false
 }
 
 let cfg = { ...DEFAULTS }
@@ -68,12 +72,13 @@ function saveConfig () {
 
 // ── State ──────────────────────────────────────────────────────────────────
 
-let mainWindow = null
-let oscServer  = null
-let udpSock    = null
-let bonjour    = null
-let resetTimer = null
-let currentUrl = null
+let mainWindow      = null
+let oscServer       = null
+let udpSock         = null
+let bonjour         = null
+let resetTimer      = null
+let currentUrl      = null
+let keyboardBlocker = null
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -89,16 +94,20 @@ function getLocalIPs () {
 
 function getStatus () {
   return {
-    active:         !!(mainWindow && !mainWindow.isDestroyed()),
-    url:            currentUrl,
-    home:           cfg.start_url,
-    reset_interval: cfg.reset_time,
-    mdns_name:      cfg.mdns_name,
-    hostname:       os.hostname(),
-    ip_addresses:   getLocalIPs(),
-    osc_port:       cfg.osc_port,
-    udp_text_port:  cfg.udp_text_port,
-    web_port:       cfg.web_port
+    active:           !!(mainWindow && !mainWindow.isDestroyed()),
+    url:              currentUrl,
+    home:             cfg.start_url,
+    reset_interval:   cfg.reset_time,
+    mdns_name:        cfg.mdns_name,
+    hostname:         os.hostname(),
+    ip_addresses:     getLocalIPs(),
+    osc_port:         cfg.osc_port,
+    udp_text_port:    cfg.udp_text_port,
+    web_port:         cfg.web_port,
+    hide_cursor:      cfg.hide_cursor,
+    disable_touch:    cfg.disable_touch,
+    disable_keyboard: cfg.disable_keyboard,
+    test_mode:        cfg.test_mode
   }
 }
 
@@ -106,6 +115,7 @@ function getStatus () {
 
 function navigate (url) {
   if (!url) return
+  if (cfg.test_mode) { cfg.test_mode = false; saveConfig() }
   currentUrl = url
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(url)
   scheduleReset()
@@ -136,6 +146,106 @@ function scheduleReset () {
   }
 }
 
+// ── Input / Display helpers ────────────────────────────────────────────────
+
+function parseBool (v) {
+  if (typeof v === 'boolean') return v
+  if (typeof v === 'number')  return v !== 0
+  if (typeof v === 'string')  return ['1', 'true', 'on', 'yes'].includes(v.toLowerCase())
+  return !!v
+}
+
+function testModeHtml () {
+  const name   = cfg.mdns_name || os.hostname()
+  const ips    = getLocalIPs()
+  const ipRows = ips.map(ip => `<div class="ip">${ip}</div>`).join('')
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KiOSC-BrowsR \u00b7 Test Mode</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,monospace;
+  width:100vw;height:100vh;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;overflow:hidden;user-select:none}
+.badge{position:fixed;top:4vh;right:4vw;background:#fbbf24;color:#000;
+  padding:.5em 1.4em;border-radius:2em;font-size:clamp(12px,1.2vw,18px);
+  font-weight:800;letter-spacing:.12em;text-transform:uppercase;
+  animation:pulse 1.8s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.label{font-size:clamp(11px,1.1vw,16px);text-transform:uppercase;letter-spacing:.25em;
+  color:#34d399;margin-bottom:3vh}
+.name{font-size:clamp(40px,10vw,160px);font-weight:800;letter-spacing:-.02em;
+  color:#fff;margin-bottom:5vh;word-break:break-all;text-align:center;
+  line-height:1;padding:0 4vw}
+.ips{display:flex;flex-direction:column;align-items:center;gap:1vh}
+.ip{font-size:clamp(14px,2vw,32px);color:#6b7280;font-family:monospace;letter-spacing:.05em}
+.clock{position:fixed;bottom:4vh;font-size:clamp(20px,4vw,64px);color:#1f2937;
+  font-family:monospace;letter-spacing:.1em}
+.version{position:fixed;top:4vh;left:4vw;font-size:clamp(10px,.9vw,14px);
+  color:#374151;font-family:monospace}
+</style>
+</head>
+<body>
+<div class="badge">Test Mode</div>
+<div class="version">KiOSC-BrowsR v2</div>
+<div class="label">Kiosk Name</div>
+<div class="name">${name}</div>
+<div class="ips">${ipRows}</div>
+<div class="clock" id="clk"></div>
+<script>
+function tick(){
+  var n=new Date()
+  document.getElementById('clk').textContent=n.toTimeString().slice(0,8)
+  setTimeout(tick,1000-n.getMilliseconds())
+}
+tick()
+<\/script>
+</body></html>`
+}
+
+function applyInputSettings () {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  const wc = mainWindow.webContents
+
+  // Cursor — injected <style> tag; persists within a page, re-injected on each navigation
+  wc.executeJavaScript(`(function(){
+    var el=document.getElementById('__kc_cur')
+    if(!el){el=document.createElement('style');el.id='__kc_cur';
+      (document.head||document.documentElement).appendChild(el)}
+    el.textContent=${JSON.stringify(cfg.hide_cursor ? '*,*::before,*::after{cursor:none!important}' : '')}
+  })()`).catch(() => {})
+
+  // Touch — capture-phase listeners that block all touch events
+  wc.executeJavaScript(`(function(){
+    var id='__kc_touch',ev=['touchstart','touchend','touchmove','touchcancel']
+    if(${cfg.disable_touch}){
+      if(!window[id]){
+        var h=function(e){e.preventDefault();e.stopImmediatePropagation()}
+        window[id]=h
+        ev.forEach(function(t){document.addEventListener(t,h,{capture:true,passive:false})})
+      }
+    }else{
+      if(window[id]){
+        ev.forEach(function(t){document.removeEventListener(t,window[id],{capture:true})})
+        delete window[id]
+      }
+    }
+  })()`).catch(() => {})
+
+  // Keyboard — Electron-level before-input-event; blocks all key input to the renderer
+  if (cfg.disable_keyboard && !keyboardBlocker) {
+    keyboardBlocker = (event) => { event.preventDefault() }
+    wc.on('before-input-event', keyboardBlocker)
+  } else if (!cfg.disable_keyboard && keyboardBlocker) {
+    wc.removeListener('before-input-event', keyboardBlocker)
+    keyboardBlocker = null
+  }
+}
+
+// ── Commands ───────────────────────────────────────────────────────────────
+
 function dispatch (cmd, params = {}) {
   console.log(`[cmd] ${cmd}`, params)
   switch (cmd) {
@@ -161,6 +271,36 @@ function dispatch (cmd, params = {}) {
     case 'set_reset_time':
       cfg.reset_time = parseInt(params.seconds, 10) || 0
       scheduleReset()
+      break
+    case 'hide_cursor':
+      cfg.hide_cursor = parseBool(params.value)
+      applyInputSettings()
+      saveConfig()
+      console.log(`[input] hide_cursor=${cfg.hide_cursor}`)
+      break
+    case 'disable_touch':
+      cfg.disable_touch = parseBool(params.value)
+      applyInputSettings()
+      saveConfig()
+      console.log(`[input] disable_touch=${cfg.disable_touch}`)
+      break
+    case 'disable_keyboard':
+      cfg.disable_keyboard = parseBool(params.value)
+      applyInputSettings()
+      saveConfig()
+      console.log(`[input] disable_keyboard=${cfg.disable_keyboard}`)
+      break
+    case 'test_mode':
+      cfg.test_mode = parseBool(params.value)
+      if (cfg.test_mode) {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.loadURL('data:text/html,' + encodeURIComponent(testModeHtml()))
+        }
+      } else {
+        navigate(currentUrl || cfg.start_url)
+      }
+      saveConfig()
+      console.log(`[input] test_mode=${cfg.test_mode}`)
       break
     case 'status':
       console.log('[status]', JSON.stringify(getStatus(), null, 2))
@@ -191,6 +331,7 @@ function startOsc () {
     const params  = {}
     if (['start', 'restart', 'goto'].includes(cmd)) params.url = args[0]
     if (cmd === 'set_reset_time') params.seconds = args[0]
+    if (['hide_cursor', 'disable_touch', 'disable_keyboard', 'test_mode'].includes(cmd)) params.value = args[0]
     dispatch(cmd, params)
   })
 }
@@ -218,6 +359,7 @@ function startUdp () {
     const params = {}
     if (['start', 'restart', 'goto'].includes(verb)) params.url = rest[0]
     if (verb === 'set_reset_time') params.seconds = rest[0]
+    if (['hide_cursor', 'disable_touch', 'disable_keyboard', 'test_mode'].includes(verb)) params.value = rest[0]
     dispatch(verb, params)
   })
 }
@@ -332,11 +474,21 @@ function startWebAdmin () {
     // POST /api/config  (only live-editable keys; ports/binds require restart)
     if (req.method === 'POST' && url.pathname === '/api/config') {
       return readBody(req, res, (body) => {
-        const editable = ['start_url', 'reset_time', 'mdns_name', 'kiosk']
+        const editable = ['start_url', 'reset_time', 'mdns_name', 'kiosk',
+                          'hide_cursor', 'disable_touch', 'disable_keyboard', 'test_mode']
+        const prevTestMode = cfg.test_mode
         for (const k of editable) {
           if (k in body) cfg[k] = body[k]
         }
         saveConfig()
+        applyInputSettings()
+        if (cfg.test_mode && !prevTestMode) {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.loadURL('data:text/html,' + encodeURIComponent(testModeHtml()))
+          }
+        } else if (!cfg.test_mode && prevTestMode) {
+          navigate(currentUrl || cfg.start_url)
+        }
         return { ok: true }
       })
     }
@@ -400,8 +552,15 @@ function createWindow () {
 
   mainWindow.on('closed', () => { mainWindow = null })
 
+  // Re-apply input/display settings after every page load (injections reset on navigation)
+  mainWindow.webContents.on('did-finish-load', () => applyInputSettings())
+
   currentUrl = cfg.start_url
-  mainWindow.loadURL(cfg.start_url)
+  if (cfg.test_mode) {
+    mainWindow.loadURL('data:text/html,' + encodeURIComponent(testModeHtml()))
+  } else {
+    mainWindow.loadURL(cfg.start_url)
+  }
   scheduleReset()
   console.log(`[window] kiosk=${useKiosk}, loading ${cfg.start_url}`)
 }

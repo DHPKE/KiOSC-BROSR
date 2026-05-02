@@ -214,6 +214,42 @@
       z-index: 999;
     }
     #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* Toggle switch */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 11px 0;
+      border-bottom: 1px solid var(--border);
+      gap: 12px;
+    }
+    .toggle-row:last-child { border-bottom: none; }
+    .toggle-label { display: flex; flex-direction: column; gap: 3px; flex: 1; }
+    .toggle-label span { font-size: 0.88rem; color: var(--text); }
+    .toggle-label small { font-size: 0.74rem; color: var(--muted); }
+    .switch { position: relative; display: inline-block; width: 42px; height: 24px; flex-shrink: 0; }
+    .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+    .switch .knob {
+      position: absolute; inset: 0;
+      background: var(--border);
+      border-radius: 24px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .switch .knob::before {
+      content: '';
+      position: absolute;
+      height: 18px; width: 18px;
+      left: 3px; top: 3px;
+      background: var(--muted);
+      border-radius: 50%;
+      transition: transform 0.2s, background 0.2s;
+    }
+    .switch input:checked + .knob { background: rgba(52,211,153,0.25); }
+    .switch input:checked + .knob::before { transform: translateX(18px); background: var(--accent); }
+    .toggle-row.warn .switch input:checked + .knob { background: rgba(251,191,36,0.18); }
+    .toggle-row.warn .switch input:checked + .knob::before { background: #fbbf24; }
   </style>
 </head>
 <body>
@@ -302,6 +338,55 @@
     <button class="btn btn-primary" style="width:100%" onclick="saveSettings()">Save settings</button>
   </div>
 
+  <!-- ── Input & Display card ────────────────────────────────────── -->
+  <div class="card">
+    <h2>Input &amp; Display</h2>
+
+    <div class="toggle-row">
+      <div class="toggle-label">
+        <span>Hide cursor</span>
+        <small>Remove mouse pointer from the kiosk display</small>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="tog-hide-cursor" onchange="toggleSetting('hide_cursor', this.checked)">
+        <span class="knob"></span>
+      </label>
+    </div>
+
+    <div class="toggle-row">
+      <div class="toggle-label">
+        <span>Disable touch</span>
+        <small>Block all touchscreen input events</small>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="tog-disable-touch" onchange="toggleSetting('disable_touch', this.checked)">
+        <span class="knob"></span>
+      </label>
+    </div>
+
+    <div class="toggle-row">
+      <div class="toggle-label">
+        <span>Disable keyboard</span>
+        <small>Block all keyboard input to the kiosk window</small>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="tog-disable-keyboard" onchange="toggleSetting('disable_keyboard', this.checked)">
+        <span class="knob"></span>
+      </label>
+    </div>
+
+    <div class="toggle-row warn">
+      <div class="toggle-label">
+        <span>Test mode</span>
+        <small>Show hostname &amp; IP addresses fullscreen on display</small>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="tog-test-mode" onchange="toggleSetting('test_mode', this.checked)">
+        <span class="knob"></span>
+      </label>
+    </div>
+  </div>
+
 </main>
 
 <div id="toast"></div>
@@ -357,6 +442,12 @@
       $('status-reset').textContent = s.reset_interval > 0
         ? `${s.reset_interval}s`
         : 'disabled'
+
+      // Input & display toggles
+      $('tog-hide-cursor').checked      = !!s.hide_cursor
+      $('tog-disable-touch').checked    = !!s.disable_touch
+      $('tog-disable-keyboard').checked = !!s.disable_keyboard
+      $('tog-test-mode').checked        = !!s.test_mode
     } catch (e) {
       $('hdr-status').textContent = 'offline'
       $('hdr-dot').className = 'dot'
@@ -404,7 +495,16 @@
       toast('Save failed: ' + e.message)
     }
   }
-
+  // ── Toggle input/display settings ───────────────────────────────────────
+  async function toggleSetting (key, value) {
+    try {
+      await apiFetch('POST', '/api/config', { [key]: value })
+      toast(key.replace(/_/g, ' ') + (value ? ' on' : ' off'))
+      setTimeout(refresh, 400)
+    } catch (e) {
+      toast('Error: ' + e.message)
+    }
+  }
   // ── Copy to clipboard ──────────────────────────────────────────────────
   async function copy(id) {
     const el = $(id)
