@@ -34,7 +34,6 @@ mac:
     - dmg
   category: public.app-category.utilities
   darkModeSupport: true
-  identity: null
 
 nsis:
   oneClick: false
