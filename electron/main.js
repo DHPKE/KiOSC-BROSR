@@ -250,9 +250,9 @@ function applyInputSettings () {
 }
 
 function loadTestMode () {
-  const tmp = path.join(os.tmpdir(), 'kiosc-browsr-testmode.html')
-  fs.writeFileSync(tmp, testModeHtml(), 'utf8')
-  mainWindow.loadFile(tmp)
+  // Serve via the local HTTP server so file:// path-resolution and CSP
+  // sandbox restrictions cannot interfere with inline scripts/styles.
+  mainWindow.loadURL(`http://127.0.0.1:${cfg.web_port}/__testmode`)
 }
 
 function restartApp () {
@@ -498,6 +498,20 @@ function startWebAdmin () {
   const htmlPath = path.join(__dirname, 'webadmin', 'index.html')
 
   const server = http.createServer((req, res) => {
+    let url
+    try {
+      url = new URL(req.url, `http://${req.headers.host}`)
+    } catch {
+      res.writeHead(400)
+      return res.end('Bad request')
+    }
+
+    // GET /__testmode — no-auth internal route; only reachable via loopback
+    if (req.method === 'GET' && url.pathname === '/__testmode') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
+      return res.end(testModeHtml())
+    }
+
     // Basic auth
     const auth  = req.headers['authorization'] || ''
     const creds = Buffer.from(auth.replace('Basic ', ''), 'base64').toString()
@@ -513,13 +527,7 @@ function startWebAdmin () {
       return res.end('Unauthorized')
     }
 
-    let url
-    try {
-      url = new URL(req.url, `http://${req.headers.host}`)
-    } catch {
-      res.writeHead(400)
-      return res.end('Bad request')
-    }
+    // URL already parsed above
 
     // GET /  → serve admin UI
     if (req.method === 'GET' && url.pathname === '/') {
