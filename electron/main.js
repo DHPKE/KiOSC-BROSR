@@ -252,6 +252,10 @@ function applyInputSettings () {
 function loadTestMode () {
   // Serve via the local HTTP server so file:// path-resolution and CSP
   // sandbox restrictions cannot interfere with inline scripts/styles.
+  // Also reschedule the reset timer so it doesn't fire navigate() and
+  // immediately clear test mode.
+  if (resetTimer) clearTimeout(resetTimer)
+  resetTimer = null
   mainWindow.loadURL(`http://127.0.0.1:${cfg.web_port}/__testmode`)
 }
 
@@ -289,7 +293,12 @@ function applyLoginItem () {
     try {
       // Pass the app path explicitly — required on macOS when the app may not
       // be running from /Applications (e.g. first launch from DMG).
-      app.setLoginItemSettings({ openAtLogin: cfg.launch_at_login, path: app.getPath('exe') })
+      // app.getPath('exe') is the binary inside the bundle; macOS login items
+      // need the .app bundle path (3 levels up from Contents/MacOS/<binary>).
+      const bundlePath = process.platform === 'darwin'
+        ? path.resolve(app.getPath('exe'), '../../..')
+        : app.getPath('exe')
+      app.setLoginItemSettings({ openAtLogin: cfg.launch_at_login, path: bundlePath })
       console.log(`[autostart] login item set: ${cfg.launch_at_login}`)
     } catch (e) {
       console.error('[autostart]', e.message)
