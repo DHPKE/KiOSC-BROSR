@@ -696,7 +696,9 @@ async function checkMacOSAppLocation () {
 
   try {
     if (fs.existsSync(dest)) execFileSync('rm', ['-rf', dest])
-    execFileSync('cp', ['-R', appPath, dest])
+    // ditto preserves resource forks, HFS metadata and all xattrs so the
+    // code signature remains valid. cp -R breaks the signature → "damaged".
+    execFileSync('ditto', [appPath, dest])
     // Remove quarantine flag so macOS doesn't re-prompt Gatekeeper
     try { execFileSync('xattr', ['-dr', 'com.apple.quarantine', dest]) } catch (_) {}
     // Re-launch from the new location and exit this instance
