@@ -1,0 +1,23 @@
+{
+  "name": "kiosc-browsr",
+  "version": "2.0.0",
+  "description": "OSC/UDP-controlled browser kiosk — Electron (Linux / macOS / Windows)",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --no-kiosk",
+    "build:linux": "electron-builder --linux",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win",
+    "build:all": "electron-builder -mwl"
+  },
+  "dependencies": {
+    "bonjour-service": "^1.3.0",
+    "js-yaml": "^4.1.0",
+    "node-osc": "^9.0.0"
+  },
+  "devDependencies": {
+    "electron": "^30.0.0",
+    "electron-builder": "^24.6.0"
+  }
+}

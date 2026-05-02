@@ -1,0 +1,21 @@
+{
+  "appId": "com.dhpke.kioscbrowsr",
+  "appName": "KiOSC-BrowsR",
+  "webDir": "dist",
+  "server": {
+    "allowNavigation": ["*"]
+  },
+  "plugins": {
+    "StatusBar": {
+      "style": "Dark",
+      "backgroundColor": "#000000",
+      "overlaysWebView": false
+    }
+  },
+  "android": {
+    "allowMixedContent": true
+  },
+  "ios": {
+    "contentInset": "never"
+  }
+}
