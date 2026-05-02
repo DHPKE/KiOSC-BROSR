@@ -36,13 +36,22 @@ mac:
   darkModeSupport: true
 
 dmg:
-  # Include the Install.command so users on macOS Sequoia can bypass Gatekeeper.
-  # Shell scripts get "unidentified developer + Open Anyway"; .app bundles get
-  # "damaged" with no bypass. The script removes the quarantine xattr and copies
-  # the app to /Applications using ditto (signature-safe).
-  extraFiles:
-    - from: "build/Install.command"
-      to: "Install.command"
+  # Layout of items shown in the DMG Finder window.
+  # The third entry adds Install.command so users on macOS Sequoia can
+  # right-click → Open it to remove the quarantine xattr and install.
+  contents:
+    - x: 410
+      y: 150
+      type: link
+      path: /Applications
+    - x: 130
+      y: 150
+      type: file
+    - x: 130
+      y: 300
+      type: file
+      path: build/Install.command
+      name: Install.command
 
 nsis:
   oneClick: false
