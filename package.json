@@ -2,6 +2,10 @@
   "name": "kiosc-browsr",
   "version": "2.0.0",
   "description": "OSC/UDP-controlled browser kiosk — Electron (Linux / macOS / Windows)",
+  "author": {
+    "name": "DHPKE",
+    "email": "dhpke@users.noreply.github.com"
+  },
   "main": "electron/main.js",
   "scripts": {
     "start": "electron .",

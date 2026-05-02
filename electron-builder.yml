@@ -19,6 +19,7 @@ linux:
     - AppImage
   category: Utility
   executableName: kiosc-browsr
+  maintainer: "DHPKE <dhpke@users.noreply.github.com>"
   desktop:
     Name: KiOSC-BrowsR
     Comment: OSC/UDP-controlled browser kiosk
