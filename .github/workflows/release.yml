@@ -40,7 +40,10 @@ jobs:
       - name: Build Electron app (${{ matrix.platform }})
         run: npm run build:${{ matrix.platform }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Do NOT set GH_TOKEN here — electron-builder would try to auto-publish
+          # and fail with 403. The separate 'release' job uploads artifacts instead.
+          EP_DRAFT: "false"
+          EP_PRE_RELEASE: "false"
 
       - name: List dist/
         shell: bash
