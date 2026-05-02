@@ -287,7 +287,9 @@ function applyLoginItem () {
     }
   } else {
     try {
-      app.setLoginItemSettings({ openAtLogin: cfg.launch_at_login })
+      // Pass the app path explicitly — required on macOS when the app may not
+      // be running from /Applications (e.g. first launch from DMG).
+      app.setLoginItemSettings({ openAtLogin: cfg.launch_at_login, path: app.getPath('exe') })
       console.log(`[autostart] login item set: ${cfg.launch_at_login}`)
     } catch (e) {
       console.error('[autostart]', e.message)
@@ -588,8 +590,11 @@ function startWebAdmin () {
     res.end('Not found')
   })
 
-  server.listen(cfg.web_port, cfg.web_bind, () => {
-    console.log(`[webadmin] http://${cfg.web_bind}:${cfg.web_port}`)
+  return new Promise((resolve) => {
+    server.listen(cfg.web_port, cfg.web_bind, () => {
+      console.log(`[webadmin] http://${cfg.web_bind}:${cfg.web_port}`)
+      resolve()
+    })
   })
 }
 
@@ -665,56 +670,8 @@ function createWindow () {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function checkMacOSAppLocation () {
-  if (process.platform !== 'darwin') return true
-
-  const exePath = process.execPath
-  const validPrefixes = [
-    '/Applications/',
-    path.join(os.homedir(), 'Applications') + '/'
-  ]
-  if (validPrefixes.some(p => exePath.startsWith(p))) return true
-
-  // Resolve .app bundle path from the inner MacOS/binary path
-  const appPath = path.resolve(exePath, '../../..')
-  const appName = path.basename(appPath)
-  const dest    = path.join('/Applications', appName)
-
-  const { response } = await dialog.showMessageBox({
-    type:      'warning',
-    buttons:   ['Move to Applications', 'Quit'],
-    defaultId: 0,
-    cancelId:  1,
-    message:   `Move ${appName} to the Applications folder?`,
-    detail:    'Running from a disk image or Downloads folder can cause crashes when the ' +
-               'disk image is ejected. Move to Applications to fix this.'
-  })
-
-  if (response === 1) {
-    app.quit()
-    return false
-  }
-
-  try {
-    if (fs.existsSync(dest)) execFileSync('rm', ['-rf', dest])
-    // ditto preserves resource forks, HFS metadata and all xattrs so the
-    // code signature remains valid. cp -R breaks the signature → "damaged".
-    execFileSync('ditto', [appPath, dest])
-    // Remove quarantine flag so macOS doesn't re-prompt Gatekeeper
-    try { execFileSync('xattr', ['-dr', 'com.apple.quarantine', dest]) } catch (_) {}
-    // Re-launch from the new location and exit this instance
-    execFileSync('open', [dest])
-    app.quit()
-    return false
-  } catch (e) {
-    console.error('[macos] move to Applications failed:', e.message)
-    const { response: r2 } = await dialog.showMessageBox({
-      type:    'error',
-      buttons: ['Continue Anyway', 'Quit'],
-      message: 'Could not move to Applications',
-      detail:  `Please drag ${appName} to your Applications folder manually, then re-open it.\n\n${e.message}`
-    })
-    if (r2 === 1) { app.quit(); return false }
-  }
+  // Disabled: Install.command in the DMG handles moving the app to /Applications
+  // and removing the quarantine xattr (required for macOS Sequoia compatibility).
   return true
 }
 
@@ -727,7 +684,7 @@ app.whenReady().then(async () => {
   startOsc()
   startUdp()
   startMdns()
-  startWebAdmin()
+  await startWebAdmin()
   if (cfg.autostart) createWindow()
 })
 
