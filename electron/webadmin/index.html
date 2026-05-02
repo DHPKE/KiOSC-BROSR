@@ -387,6 +387,37 @@
     </div>
   </div>
 
+  <!-- ── System card ─────────────────────────────────────────────── -->
+  <div class="card">
+    <h2>System</h2>
+
+    <div class="toggle-row">
+      <div class="toggle-label">
+        <span>Always on top</span>
+        <small>Keep kiosk window above all other apps; re-focus automatically on blur</small>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="tog-always-on-top" onchange="toggleSetting('always_on_top', this.checked)">
+        <span class="knob"></span>
+      </label>
+    </div>
+
+    <div class="toggle-row">
+      <div class="toggle-label">
+        <span>Launch at login</span>
+        <small>Start KiOSC-BrowsR automatically when the system boots</small>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="tog-launch-at-login" onchange="toggleSetting('launch_at_login', this.checked)">
+        <span class="knob"></span>
+      </label>
+    </div>
+
+    <div style="margin-top:16px">
+      <button class="btn btn-danger" style="width:100%" onclick="confirmRestart()">Restart App</button>
+    </div>
+  </div>
+
 </main>
 
 <div id="toast"></div>
@@ -443,6 +474,9 @@
         ? `${s.reset_interval}s`
         : 'disabled'
 
+      $('tog-always-on-top').checked    = !!s.always_on_top
+      $('tog-launch-at-login').checked  = !!s.launch_at_login
+
       // Input & display toggles
       $('tog-hide-cursor').checked      = !!s.hide_cursor
       $('tog-disable-touch').checked    = !!s.disable_touch
@@ -495,6 +529,12 @@
       toast('Save failed: ' + e.message)
     }
   }
+  async function confirmRestart() {
+    if (!confirm('Restart the KiOSC-BrowsR app now?')) return
+    await apiFetch('POST', '/api/command', { cmd: 'restart_app' })
+    toast('Restarting…')
+  }
+
   // ── Toggle input/display settings ───────────────────────────────────────
   async function toggleSetting (key, value) {
     try {

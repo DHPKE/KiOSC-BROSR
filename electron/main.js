@@ -32,7 +32,9 @@ const DEFAULTS = {
   hide_cursor:      false,
   disable_touch:    false,
   disable_keyboard: false,
-  test_mode:        false
+  test_mode:        false,
+  always_on_top:    false,
+  launch_at_login:  false
 }
 
 let cfg = { ...DEFAULTS }
@@ -78,7 +80,8 @@ let udpSock         = null
 let bonjour         = null
 let resetTimer      = null
 let currentUrl      = null
-let keyboardBlocker = null
+let keyboardBlocker      = null
+let blurRefocusHandler   = null
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -107,7 +110,9 @@ function getStatus () {
     hide_cursor:      cfg.hide_cursor,
     disable_touch:    cfg.disable_touch,
     disable_keyboard: cfg.disable_keyboard,
-    test_mode:        cfg.test_mode
+    test_mode:        cfg.test_mode,
+    always_on_top:    cfg.always_on_top,
+    launch_at_login:  cfg.launch_at_login
   }
 }
 
@@ -244,6 +249,61 @@ function applyInputSettings () {
   }
 }
 
+function restartApp () {
+  console.log('[app] restarting…')
+  app.relaunch()
+  app.quit()
+}
+
+function applyLoginItem () {
+  if (process.platform === 'linux') {
+    const desktopDir  = path.join(os.homedir(), '.config', 'autostart')
+    const desktopFile = path.join(desktopDir, 'kiosc-browsr.desktop')
+    if (cfg.launch_at_login) {
+      try {
+        fs.mkdirSync(desktopDir, { recursive: true })
+        fs.writeFileSync(desktopFile, [
+          '[Desktop Entry]',
+          'Type=Application',
+          'Name=KiOSC-BrowsR',
+          `Exec=${process.execPath}`,
+          'Hidden=false',
+          'NoDisplay=false',
+          'X-GNOME-Autostart-enabled=true'
+        ].join('\n') + '\n', 'utf8')
+        console.log('[autostart] desktop entry written:', desktopFile)
+      } catch (e) {
+        console.error('[autostart]', e.message)
+      }
+    } else {
+      try { fs.unlinkSync(desktopFile) } catch (_) {}
+      console.log('[autostart] desktop entry removed')
+    }
+  } else {
+    try {
+      app.setLoginItemSettings({ openAtLogin: cfg.launch_at_login })
+      console.log(`[autostart] login item set: ${cfg.launch_at_login}`)
+    } catch (e) {
+      console.error('[autostart]', e.message)
+    }
+  }
+}
+
+function applyWindowBehavior () {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.setAlwaysOnTop(cfg.always_on_top, 'screen-saver')
+  if (blurRefocusHandler) {
+    mainWindow.removeListener('blur', blurRefocusHandler)
+    blurRefocusHandler = null
+  }
+  if (cfg.always_on_top) {
+    blurRefocusHandler = () => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.focus()
+    }
+    mainWindow.on('blur', blurRefocusHandler)
+  }
+}
+
 // ── Commands ───────────────────────────────────────────────────────────────
 
 function dispatch (cmd, params = {}) {
@@ -302,6 +362,21 @@ function dispatch (cmd, params = {}) {
       saveConfig()
       console.log(`[input] test_mode=${cfg.test_mode}`)
       break
+    case 'restart_app':
+      restartApp()
+      break
+    case 'always_on_top':
+      cfg.always_on_top = parseBool(params.value)
+      applyWindowBehavior()
+      saveConfig()
+      console.log(`[window] always_on_top=${cfg.always_on_top}`)
+      break
+    case 'launch_at_login':
+      cfg.launch_at_login = parseBool(params.value)
+      applyLoginItem()
+      saveConfig()
+      console.log(`[autostart] launch_at_login=${cfg.launch_at_login}`)
+      break
     case 'status':
       console.log('[status]', JSON.stringify(getStatus(), null, 2))
       break
@@ -331,7 +406,8 @@ function startOsc () {
     const params  = {}
     if (['start', 'restart', 'goto'].includes(cmd)) params.url = args[0]
     if (cmd === 'set_reset_time') params.seconds = args[0]
-    if (['hide_cursor', 'disable_touch', 'disable_keyboard', 'test_mode'].includes(cmd)) params.value = args[0]
+    if (['hide_cursor', 'disable_touch', 'disable_keyboard', 'test_mode',
+         'always_on_top', 'launch_at_login'].includes(cmd)) params.value = args[0]
     dispatch(cmd, params)
   })
 }
@@ -359,7 +435,8 @@ function startUdp () {
     const params = {}
     if (['start', 'restart', 'goto'].includes(verb)) params.url = rest[0]
     if (verb === 'set_reset_time') params.seconds = rest[0]
-    if (['hide_cursor', 'disable_touch', 'disable_keyboard', 'test_mode'].includes(verb)) params.value = rest[0]
+    if (['hide_cursor', 'disable_touch', 'disable_keyboard', 'test_mode',
+         'always_on_top', 'launch_at_login'].includes(verb)) params.value = rest[0]
     dispatch(verb, params)
   })
 }
@@ -475,13 +552,17 @@ function startWebAdmin () {
     if (req.method === 'POST' && url.pathname === '/api/config') {
       return readBody(req, res, (body) => {
         const editable = ['start_url', 'reset_time', 'mdns_name', 'kiosk',
-                          'hide_cursor', 'disable_touch', 'disable_keyboard', 'test_mode']
-        const prevTestMode = cfg.test_mode
+                          'hide_cursor', 'disable_touch', 'disable_keyboard', 'test_mode',
+                          'always_on_top', 'launch_at_login']
+        const prevTestMode      = cfg.test_mode
+        const prevLaunchAtLogin = cfg.launch_at_login
         for (const k of editable) {
           if (k in body) cfg[k] = body[k]
         }
         saveConfig()
         applyInputSettings()
+        applyWindowBehavior()
+        if (cfg.launch_at_login !== prevLaunchAtLogin) applyLoginItem()
         if (cfg.test_mode && !prevTestMode) {
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.loadURL('data:text/html,' + encodeURIComponent(testModeHtml()))
@@ -562,6 +643,7 @@ function createWindow () {
     mainWindow.loadURL(cfg.start_url)
   }
   scheduleReset()
+  applyWindowBehavior()
   console.log(`[window] kiosk=${useKiosk}, loading ${cfg.start_url}`)
 }
 
@@ -629,6 +711,7 @@ async function checkMacOSAppLocation () {
 app.whenReady().then(async () => {
   if (!(await checkMacOSAppLocation())) return
   loadConfig()
+  applyLoginItem()
   if (cfg.autostart) createWindow()
   startOsc()
   startUdp()
