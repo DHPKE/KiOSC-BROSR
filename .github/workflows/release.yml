@@ -38,12 +38,7 @@ jobs:
         run: npm ci
 
       - name: Build Electron app (${{ matrix.platform }})
-        run: npm run build:${{ matrix.platform }}
-        env:
-          # Do NOT set GH_TOKEN here — electron-builder would try to auto-publish
-          # and fail with 403. The separate 'release' job uploads artifacts instead.
-          EP_DRAFT: "false"
-          EP_PRE_RELEASE: "false"
+        run: npx electron-builder --${{ matrix.platform }} --publish never
 
       - name: List dist/
         shell: bash
