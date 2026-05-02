@@ -722,11 +722,11 @@ app.whenReady().then(async () => {
   if (!(await checkMacOSAppLocation())) return
   loadConfig()
   applyLoginItem()
-  if (cfg.autostart) createWindow()
   startOsc()
   startUdp()
   startMdns()
   startWebAdmin()
+  if (cfg.autostart) createWindow()
 })
 
 app.on('window-all-closed', () => {
