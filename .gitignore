@@ -1,0 +1,6 @@
+node_modules/
+dist/
+src/mobile/node_modules/
+src/mobile/dist/
+*.log
+.DS_Store

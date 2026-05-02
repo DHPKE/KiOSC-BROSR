@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KiOSC-BrowsR Admin</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #111827;
+      --surface:  #1f2937;
+      --border:   #374151;
+      --accent:   #34d399;
+      --accent2:  #60a5fa;
+      --danger:   #f87171;
+      --text:     #e5e7eb;
+      --muted:    #9ca3af;
+      --radius:   10px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 0 0 40px;
+    }
+
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 18px 28px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    header h1 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: -0.5px;
+    }
+    header .dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: var(--muted);
+      flex-shrink: 0;
+      transition: background 0.3s;
+    }
+    header .dot.active { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+    header .status-text { font-size: 0.85rem; color: var(--muted); }
+    header .spacer { flex: 1; }
+    header .hostname {
+      font-size: 0.85rem;
+      color: var(--accent2);
+      font-family: 'SF Mono', 'Fira Code', monospace;
+    }
+
+    main {
+      max-width: 1100px;
+      margin: 28px auto;
+      padding: 0 20px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 20px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 22px 24px;
+    }
+    .card.wide { grid-column: 1 / -1; }
+
+    .card h2 {
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--muted);
+      margin-bottom: 16px;
+    }
+
+    /* Connection card */
+    .mdns-name {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--accent);
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      margin-bottom: 16px;
+      word-break: break-all;
+    }
+    .addr-table { width: 100%; border-collapse: collapse; }
+    .addr-table td {
+      padding: 6px 8px;
+      font-size: 0.85rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .addr-table td:first-child { color: var(--muted); width: 90px; }
+    .addr-table td:last-child { font-family: 'SF Mono', 'Fira Code', monospace; }
+    .addr-table tr:last-child td { border-bottom: none; }
+    .addr-table .copy-btn {
+      float: right;
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 1px 7px;
+      border-radius: 4px;
+      font-size: 0.72rem;
+      cursor: pointer;
+    }
+    .addr-table .copy-btn:hover { color: var(--accent); border-color: var(--accent); }
+    .ip-row { margin-top: 12px; font-size: 0.8rem; color: var(--muted); }
+    .ip-row span { color: var(--text); font-family: 'SF Mono', 'Fira Code', monospace; }
+
+    /* Status card */
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      margin-bottom: 14px;
+      background: rgba(107,114,128,0.15);
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+    .status-badge.active {
+      background: rgba(52,211,153,0.1);
+      color: var(--accent);
+      border-color: rgba(52,211,153,0.3);
+    }
+    .status-badge .led {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    .current-url {
+      font-size: 0.83rem;
+      color: var(--muted);
+      word-break: break-all;
+      margin-bottom: 4px;
+    }
+    .current-url strong { color: var(--text); font-weight: 400; }
+
+    /* Navigate card */
+    .url-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    input[type="url"], input[type="text"], input[type="number"] {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 9px 12px;
+      font-size: 0.88rem;
+      width: 100%;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input:focus { border-color: var(--accent2); }
+    .btn {
+      padding: 9px 18px;
+      border-radius: 6px;
+      border: none;
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: opacity 0.15s;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn-primary   { background: var(--accent);  color: #111; }
+    .btn-secondary { background: var(--border);  color: var(--text); }
+    .btn-danger    { background: rgba(248,113,113,0.15); color: var(--danger); border: 1px solid rgba(248,113,113,0.3); }
+
+    .action-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+      gap: 8px;
+    }
+
+    /* Settings card */
+    .field { margin-bottom: 14px; }
+    .field label {
+      display: block;
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-bottom: 5px;
+    }
+
+    /* Toast */
+    #toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: #1a1a2e;
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      padding: 10px 24px;
+      border-radius: 24px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.25s, transform 0.25s;
+      z-index: 999;
+    }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="dot" id="hdr-dot"></div>
+  <h1>KiOSC-BrowsR</h1>
+  <span class="status-text" id="hdr-status">connecting…</span>
+  <div class="spacer"></div>
+  <span class="hostname" id="hdr-hostname"></span>
+</header>
+
+<main>
+
+  <!-- ── Connection card (full width) ───────────────────────────── -->
+  <div class="card wide">
+    <h2>Find this device on the network</h2>
+    <div class="mdns-name" id="mdns-hostname">—</div>
+    <table class="addr-table">
+      <tbody>
+        <tr>
+          <td>OSC (UDP)</td>
+          <td id="addr-osc">—
+            <button class="copy-btn" onclick="copy('addr-osc')">copy</button>
+          </td>
+        </tr>
+        <tr>
+          <td>UDP Text</td>
+          <td id="addr-udp">—
+            <button class="copy-btn" onclick="copy('addr-udp')">copy</button>
+          </td>
+        </tr>
+        <tr>
+          <td>Web Admin</td>
+          <td id="addr-web">—
+            <button class="copy-btn" onclick="copy('addr-web')">copy</button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="ip-row">IP addresses: <span id="ip-list">—</span></div>
+  </div>
+
+  <!-- ── Status card ─────────────────────────────────────────────── -->
+  <div class="card">
+    <h2>Status</h2>
+    <div class="status-badge" id="status-badge">
+      <span class="led"></span>
+      <span id="status-label">Inactive</span>
+    </div>
+    <p class="current-url">URL: <strong id="status-url">—</strong></p>
+    <p class="current-url" style="margin-top:6px">Home: <strong id="status-home">—</strong></p>
+    <p class="current-url" style="margin-top:6px">Auto-reset: <strong id="status-reset">—</strong></p>
+  </div>
+
+  <!-- ── Navigate card ───────────────────────────────────────────── -->
+  <div class="card">
+    <h2>Navigate</h2>
+    <div class="url-row">
+      <input type="url" id="nav-url" placeholder="https://…" autocomplete="off">
+      <button class="btn btn-primary" onclick="sendNav()">Go</button>
+    </div>
+    <div class="action-grid">
+      <button class="btn btn-secondary" onclick="cmd('reload')">Reload</button>
+      <button class="btn btn-secondary" onclick="cmd('home')">Home</button>
+      <button class="btn btn-secondary" onclick="cmd('stop')">Stop</button>
+      <button class="btn btn-danger"    onclick="cmd('clear')">Clear Cache</button>
+    </div>
+  </div>
+
+  <!-- ── Settings card ───────────────────────────────────────────── -->
+  <div class="card">
+    <h2>Settings</h2>
+    <div class="field">
+      <label>Home URL</label>
+      <input type="url" id="cfg-start-url" placeholder="https://example.com">
+    </div>
+    <div class="field">
+      <label>Auto-reset timer (seconds, 0 = disabled)</label>
+      <input type="number" id="cfg-reset-time" min="0" step="60">
+    </div>
+    <div class="field">
+      <label>Device name (shown in mDNS)</label>
+      <input type="text" id="cfg-mdns-name">
+    </div>
+    <button class="btn btn-primary" style="width:100%" onclick="saveSettings()">Save settings</button>
+  </div>
+
+</main>
+
+<div id="toast"></div>
+
+<script>
+  // ── API helpers ────────────────────────────────────────────────────────
+  async function apiFetch(method, pathname, body) {
+    const opts = { method, headers: {} }
+    if (body !== undefined) {
+      opts.body = JSON.stringify(body)
+      opts.headers['Content-Type'] = 'application/json'
+    }
+    const r = await fetch(pathname, opts)
+    return r.json()
+  }
+
+  function $(id) { return document.getElementById(id) }
+
+  function esc(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+  }
+
+  // ── Refresh status ─────────────────────────────────────────────────────
+  async function refresh() {
+    try {
+      const s = await apiFetch('GET', '/api/status')
+
+      // Header
+      const hn = s.hostname + '.local'
+      $('hdr-hostname').textContent = hn
+      $('hdr-status').textContent = s.active ? 'Active' : 'Inactive'
+      $('hdr-dot').className = 'dot' + (s.active ? ' active' : '')
+
+      // Connection card
+      $('mdns-hostname').textContent = hn
+      $('addr-osc').innerHTML = `${hn}:${s.osc_port} <button class="copy-btn" onclick="copy('addr-osc')">copy</button>`
+      $('addr-udp').innerHTML = `${hn}:${s.udp_text_port} <button class="copy-btn" onclick="copy('addr-udp')">copy</button>`
+      $('addr-web').innerHTML = `http://${hn}:${s.web_port} <button class="copy-btn" onclick="copy('addr-web')">copy</button>`
+      $('ip-list').textContent = (s.ip_addresses && s.ip_addresses.length)
+        ? s.ip_addresses.join(', ')
+        : '—'
+
+      // Status card
+      const badge = $('status-badge')
+      badge.className = 'status-badge' + (s.active ? ' active' : '')
+      $('status-label').textContent = s.active ? 'Active' : 'Inactive'
+      $('status-url').textContent  = s.url  || '—'
+      $('status-home').textContent = s.home || '—'
+      $('status-reset').textContent = s.reset_interval > 0
+        ? `${s.reset_interval}s`
+        : 'disabled'
+    } catch (e) {
+      $('hdr-status').textContent = 'offline'
+      $('hdr-dot').className = 'dot'
+    }
+  }
+
+  // ── Load config into settings form ─────────────────────────────────────
+  async function loadSettings() {
+    try {
+      const c = await apiFetch('GET', '/api/config')
+      $('cfg-start-url').value  = c.start_url  || ''
+      $('cfg-reset-time').value = c.reset_time != null ? c.reset_time : 3600
+      $('cfg-mdns-name').value  = c.mdns_name  || ''
+    } catch (e) { /* ignore */ }
+  }
+
+  // ── Commands ───────────────────────────────────────────────────────────
+  async function sendNav() {
+    const url = $('nav-url').value.trim()
+    if (!url) return
+    await apiFetch('POST', '/api/command', { cmd: 'goto', params: { url } })
+    toast('Navigating…')
+    $('nav-url').value = ''
+    setTimeout(refresh, 600)
+  }
+
+  async function cmd(name) {
+    await apiFetch('POST', '/api/command', { cmd: name })
+    toast(name + '…')
+    setTimeout(refresh, 600)
+  }
+
+  // ── Save settings ──────────────────────────────────────────────────────
+  async function saveSettings() {
+    const patch = {
+      start_url:  $('cfg-start-url').value.trim(),
+      reset_time: parseInt($('cfg-reset-time').value, 10) || 0,
+      mdns_name:  $('cfg-mdns-name').value.trim()
+    }
+    try {
+      await apiFetch('POST', '/api/config', patch)
+      toast('Settings saved')
+      setTimeout(refresh, 300)
+    } catch (e) {
+      toast('Save failed: ' + e.message)
+    }
+  }
+
+  // ── Copy to clipboard ──────────────────────────────────────────────────
+  async function copy(id) {
+    const el = $(id)
+    // Text content without the copy button text
+    const text = el.firstChild.textContent.trim()
+    try {
+      await navigator.clipboard.writeText(text)
+      toast('Copied!')
+    } catch {
+      toast('Copy not available')
+    }
+  }
+
+  // ── Toast ──────────────────────────────────────────────────────────────
+  let toastTimer = null
+  function toast(msg) {
+    const t = $('toast')
+    t.textContent = msg
+    t.classList.add('show')
+    if (toastTimer) clearTimeout(toastTimer)
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2200)
+  }
+
+  // ── Keyboard ───────────────────────────────────────────────────────────
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && document.activeElement.id === 'nav-url') sendNav()
+  })
+
+  // ── Init ───────────────────────────────────────────────────────────────
+  refresh()
+  loadSettings()
+  setInterval(refresh, 5000)
+</script>
+</body>
+</html>

@@ -1,0 +1,41 @@
+appId: com.dhpke.kioscbrowsr
+productName: KiOSC-BrowsR
+
+directories:
+  buildResources: build
+  output: dist
+
+files:
+  - "electron/**"
+  - "package.json"
+
+extraResources:
+  - from: "config/config.yaml.example"
+    to: "config.yaml.example"
+
+linux:
+  target:
+    - deb
+    - AppImage
+  category: Utility
+  executableName: kiosc-browsr
+  maintainer: "DHPKE <dhpke@users.noreply.github.com>"
+  desktop:
+    Name: KiOSC-BrowsR
+    Comment: OSC/UDP-controlled browser kiosk
+    Categories: Utility;Network;
+
+win:
+  target:
+    - nsis
+
+mac:
+  target:
+    - dmg
+  category: public.app-category.utilities
+  darkModeSupport: true
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
