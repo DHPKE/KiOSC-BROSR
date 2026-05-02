@@ -1,12 +1,13 @@
 'use strict'
 
-const { app, BrowserWindow } = require('electron')
+const { app, BrowserWindow, dialog } = require('electron')
 const path  = require('path')
 const fs    = require('fs')
 const os    = require('os')
 const http  = require('http')
 const dgram = require('dgram')
 const yaml  = require('js-yaml')
+const { execFileSync } = require('child_process')
 const { Server: OscServer } = require('node-osc')
 const { Bonjour } = require('bonjour-service')
 
@@ -405,9 +406,69 @@ function createWindow () {
   console.log(`[window] kiosk=${useKiosk}, loading ${cfg.start_url}`)
 }
 
+// ── macOS: enforce running from Applications folder ──────────────────────
+//
+//  Running from a mounted DMG causes SIGBUS when the DMG is ejected while
+//  the app is running (kernel unmounts the vnode that backs the mmap'd binary).
+//  Standard macOS pattern: detect non-Applications path and offer to move.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function checkMacOSAppLocation () {
+  if (process.platform !== 'darwin') return true
+
+  const exePath = process.execPath
+  const validPrefixes = [
+    '/Applications/',
+    path.join(os.homedir(), 'Applications') + '/'
+  ]
+  if (validPrefixes.some(p => exePath.startsWith(p))) return true
+
+  // Resolve .app bundle path from the inner MacOS/binary path
+  const appPath = path.resolve(exePath, '../../..')
+  const appName = path.basename(appPath)
+  const dest    = path.join('/Applications', appName)
+
+  const { response } = await dialog.showMessageBox({
+    type:      'warning',
+    buttons:   ['Move to Applications', 'Quit'],
+    defaultId: 0,
+    cancelId:  1,
+    message:   `Move ${appName} to the Applications folder?`,
+    detail:    'Running from a disk image or Downloads folder can cause crashes when the ' +
+               'disk image is ejected. Move to Applications to fix this.'
+  })
+
+  if (response === 1) {
+    app.quit()
+    return false
+  }
+
+  try {
+    if (fs.existsSync(dest)) execFileSync('rm', ['-rf', dest])
+    execFileSync('cp', ['-R', appPath, dest])
+    // Remove quarantine flag so macOS doesn't re-prompt Gatekeeper
+    try { execFileSync('xattr', ['-dr', 'com.apple.quarantine', dest]) } catch (_) {}
+    // Re-launch from the new location and exit this instance
+    execFileSync('open', [dest])
+    app.quit()
+    return false
+  } catch (e) {
+    console.error('[macos] move to Applications failed:', e.message)
+    const { response: r2 } = await dialog.showMessageBox({
+      type:    'error',
+      buttons: ['Continue Anyway', 'Quit'],
+      message: 'Could not move to Applications',
+      detail:  `Please drag ${appName} to your Applications folder manually, then re-open it.\n\n${e.message}`
+    })
+    if (r2 === 1) { app.quit(); return false }
+  }
+  return true
+}
+
 // ── App lifecycle ──────────────────────────────────────────────────────────
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  if (!(await checkMacOSAppLocation())) return
   loadConfig()
   if (cfg.autostart) createWindow()
   startOsc()
