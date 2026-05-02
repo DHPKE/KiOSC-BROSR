@@ -249,6 +249,12 @@ function applyInputSettings () {
   }
 }
 
+function loadTestMode () {
+  const tmp = path.join(os.tmpdir(), 'kiosc-browsr-testmode.html')
+  fs.writeFileSync(tmp, testModeHtml(), 'utf8')
+  mainWindow.loadFile(tmp)
+}
+
 function restartApp () {
   console.log('[app] restarting…')
   app.relaunch()
@@ -353,9 +359,7 @@ function dispatch (cmd, params = {}) {
     case 'test_mode':
       cfg.test_mode = parseBool(params.value)
       if (cfg.test_mode) {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.loadURL('data:text/html,' + encodeURIComponent(testModeHtml()))
-        }
+        if (mainWindow && !mainWindow.isDestroyed()) loadTestMode()
       } else {
         navigate(currentUrl || cfg.start_url)
       }
@@ -564,9 +568,7 @@ function startWebAdmin () {
         applyWindowBehavior()
         if (cfg.launch_at_login !== prevLaunchAtLogin) applyLoginItem()
         if (cfg.test_mode && !prevTestMode) {
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.loadURL('data:text/html,' + encodeURIComponent(testModeHtml()))
-          }
+          if (mainWindow && !mainWindow.isDestroyed()) loadTestMode()
         } else if (!cfg.test_mode && prevTestMode) {
           navigate(currentUrl || cfg.start_url)
         }
@@ -638,7 +640,7 @@ function createWindow () {
 
   currentUrl = cfg.start_url
   if (cfg.test_mode) {
-    mainWindow.loadURL('data:text/html,' + encodeURIComponent(testModeHtml()))
+    loadTestMode()
   } else {
     mainWindow.loadURL(cfg.start_url)
   }
