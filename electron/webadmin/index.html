@@ -8,14 +8,14 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:       #111827;
-      --surface:  #1f2937;
-      --border:   #374151;
-      --accent:   #34d399;
-      --accent2:  #60a5fa;
+      --bg:       #0d1117;
+      --surface:  #161b22;
+      --border:   #253040;
+      --accent:   #128FCF;
+      --accent2:  #4bb8f0;
       --danger:   #f87171;
       --text:     #e5e7eb;
-      --muted:    #9ca3af;
+      --muted:    #7d9ab5;
       --radius:   10px;
     }
 
@@ -307,6 +307,8 @@
 <body>
 
 <header>
+  <img src="pke-logo.svg" alt="PKE" style="height:26px;width:auto;flex-shrink:0;">
+  <div style="width:1px;height:22px;background:var(--border);flex-shrink:0"></div>
   <div class="dot" id="hdr-dot"></div>
   <h1>KiOSC-BrowsR</h1>
   <span class="status-text" id="hdr-status">connecting…</span>

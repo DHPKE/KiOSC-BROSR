@@ -727,6 +727,13 @@ function startWebAdmin () {
       return res.end(fs.readFileSync(htmlPath, 'utf8'))
     }
 
+    // GET /pke-logo.svg → serve logo asset
+    if (req.method === 'GET' && url.pathname === '/pke-logo.svg') {
+      const logoPath = path.join(__dirname, 'webadmin', 'pke-logo.svg')
+      res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=86400' })
+      return res.end(fs.readFileSync(logoPath))
+    }
+
     // GET /api/status
     if (req.method === 'GET' && url.pathname === '/api/status') {
       res.writeHead(200, { 'Content-Type': 'application/json' })
