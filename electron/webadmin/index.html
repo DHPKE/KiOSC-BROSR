@@ -250,6 +250,22 @@
     .switch input:checked + .knob::before { transform: translateX(18px); background: var(--accent); }
     .toggle-row.warn .switch input:checked + .knob { background: rgba(251,191,36,0.18); }
     .toggle-row.warn .switch input:checked + .knob::before { background: #fbbf24; }
+
+    /* Network card */
+    .net-row { display:flex; align-items:center; gap:12px; margin-bottom:10px; }
+    .net-row label { width:120px; font-size:0.85rem; color:var(--muted); flex-shrink:0; }
+    .net-row input, .net-row select {
+      flex:1; background:var(--bg); border:1px solid var(--border);
+      color:var(--text); padding:7px 10px; border-radius:6px; font-size:0.9rem;
+    }
+    .net-row input:focus, .net-row select:focus { outline:none; border-color:var(--accent); }
+    .net-addr-row { display:flex; align-items:center; gap:6px; flex:1; }
+    .net-addr-row span { color:var(--muted); font-weight:600; }
+    .net-prefix { width:64px !important; flex:none !important; }
+    .seg-ctrl { display:flex; border:1px solid var(--border); border-radius:6px; overflow:hidden; }
+    .seg { background:none; border:none; color:var(--muted); padding:6px 20px; cursor:pointer; font-size:0.85rem; }
+    .seg.active { background:var(--accent); color:#111; font-weight:600; }
+    .net-hint { margin-top:10px; font-size:0.8rem; color:var(--muted); min-height:1.2em; }
   </style>
 </head>
 <body>
@@ -418,6 +434,47 @@
     </div>
   </div>
 
+  <!-- ── Network card ─────────────────────────────────────── -->
+  <div class="card wide">
+    <h2>Network</h2>
+    <div id="net-unsupported" style="display:none; color:var(--muted); font-size:0.9rem; padding:8px 0">
+      Network configuration requires Linux with NetworkManager (<code>nmcli</code>).
+    </div>
+    <div id="net-ui">
+      <div class="net-row">
+        <label>Interface</label>
+        <select id="net-iface" onchange="showNetInterface(parseInt(this.value))"></select>
+      </div>
+      <div class="net-row">
+        <label>Mode</label>
+        <div class="seg-ctrl">
+          <button class="seg" id="net-mode-dhcp"   onclick="setNetMode('auto')">DHCP</button>
+          <button class="seg" id="net-mode-static" onclick="setNetMode('manual')">Static</button>
+        </div>
+      </div>
+      <div id="net-static-fields">
+        <div class="net-row">
+          <label>IP Address</label>
+          <div class="net-addr-row">
+            <input type="text" id="net-address" placeholder="192.168.1.100" autocomplete="off">
+            <span>/</span>
+            <input type="number" id="net-prefix" class="net-prefix" min="1" max="32" value="24">
+          </div>
+        </div>
+        <div class="net-row">
+          <label>Gateway</label>
+          <input type="text" id="net-gateway" placeholder="192.168.1.1" autocomplete="off">
+        </div>
+        <div class="net-row">
+          <label>DNS</label>
+          <input type="text" id="net-dns" placeholder="8.8.8.8" autocomplete="off">
+        </div>
+      </div>
+      <button class="btn btn-primary" style="margin-top:4px" onclick="saveNetwork()">Apply network settings</button>
+      <p class="net-hint" id="net-hint"></p>
+    </div>
+  </div>
+
 </main>
 
 <div id="toast"></div>
@@ -537,6 +594,80 @@
     toast('Restarting…')
   }
 
+  // ── Network configuration ───────────────────────────────────────
+  let netInterfaces = []
+  let netMode = 'auto'
+
+  async function loadNetwork () {
+    try {
+      const data = await apiFetch('GET', '/api/network')
+      netInterfaces = data.interfaces || []
+      if (netInterfaces.length === 0) {
+        $('net-ui').style.display = 'none'
+        $('net-unsupported').style.display = 'block'
+        return
+      }
+      const sel = $('net-iface')
+      sel.innerHTML = netInterfaces.map((iface, idx) =>
+        `<option value="${idx}">${esc(iface.device)} — ${esc(iface.connection)}</option>`
+      ).join('')
+      showNetInterface(0)
+    } catch {
+      $('net-ui').style.display = 'none'
+      $('net-unsupported').style.display = 'block'
+    }
+  }
+
+  function showNetInterface (idx) {
+    const iface = netInterfaces[idx]
+    if (!iface) return
+    netMode = iface.mode
+    updateNetModeUI()
+    $('net-address').value = iface.address || ''
+    $('net-prefix').value  = iface.prefix  || '24'
+    $('net-gateway').value = iface.gateway || ''
+    $('net-dns').value     = iface.dns     || ''
+    $('net-hint').textContent = ''
+  }
+
+  function setNetMode (mode) {
+    netMode = mode
+    updateNetModeUI()
+  }
+
+  function updateNetModeUI () {
+    $('net-mode-dhcp').className   = 'seg' + (netMode === 'auto'   ? ' active' : '')
+    $('net-mode-static').className = 'seg' + (netMode === 'manual' ? ' active' : '')
+    $('net-static-fields').style.display = netMode === 'manual' ? '' : 'none'
+  }
+
+  async function saveNetwork () {
+    const idx = parseInt($('net-iface').value) || 0
+    const iface = netInterfaces[idx]
+    if (!iface) return
+    const body = {
+      connection: iface.connection,
+      mode:       netMode,
+      address:    $('net-address').value.trim(),
+      prefix:     $('net-prefix').value.trim(),
+      gateway:    $('net-gateway').value.trim(),
+      dns:        $('net-dns').value.trim()
+    }
+    try {
+      await apiFetch('POST', '/api/network', body)
+      if (netMode === 'manual') {
+        $('net-hint').textContent = `Applied — reconnect your browser to ${body.address}`
+        toast('Static IP applied')
+      } else {
+        $('net-hint').textContent = 'Switched to DHCP — IP address may change'
+        toast('Switched to DHCP')
+      }
+      setTimeout(loadNetwork, 3000)
+    } catch (e) {
+      toast('Network error: ' + e.message)
+    }
+  }
+
   // ── Toggle input/display settings ───────────────────────────────────────
   async function toggleSetting (key, value) {
     try {
@@ -578,6 +709,7 @@
   // ── Init ───────────────────────────────────────────────────────────────
   refresh()
   loadSettings()
+  loadNetwork()
   setInterval(refresh, 5000)
 </script>
 </body>

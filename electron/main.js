@@ -7,7 +7,7 @@ const os    = require('os')
 const http  = require('http')
 const dgram = require('dgram')
 const yaml  = require('js-yaml')
-const { execFileSync } = require('child_process')
+const { execFileSync, execFile } = require('child_process')
 const { Server: OscServer } = require('node-osc')
 const { Bonjour } = require('bonjour-service')
 
@@ -100,6 +100,69 @@ function getLocalIPs () {
     }
   }
   return result
+}
+
+// Split a nmcli terse line on unescaped ':' (values with ':' are escaped as '\:')
+function parseTerseFields (line) {
+  const fields = []
+  let cur = ''
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] === '\\' && i + 1 < line.length && line[i + 1] === ':') {
+      cur += ':'
+      i++
+    } else if (line[i] === ':') {
+      fields.push(cur)
+      cur = ''
+    } else {
+      cur += line[i]
+    }
+  }
+  fields.push(cur)
+  return fields
+}
+
+function getNetworkInterfaces () {
+  if (process.platform !== 'linux') return []
+  try {
+    const out = execFileSync('nmcli', ['-t', '-f', 'NAME,DEVICE,STATE', 'con', 'show', '--active'],
+      { encoding: 'utf8', timeout: 5000 })
+    const result = []
+    for (const line of out.trim().split('\n')) {
+      if (!line) continue
+      const fields = parseTerseFields(line)
+      if (fields.length < 3) continue
+      const [name, device, state] = fields
+      if (!device || device === '--') continue
+      if (!state.includes('activated')) continue
+      if (device === 'lo' || device.startsWith('virbr') || device.startsWith('docker') || device.startsWith('br-')) continue
+      try {
+        const detail = execFileSync('nmcli',
+          ['-t', '-f', 'IP4.ADDRESS,IP4.GATEWAY,IP4.DNS,ipv4.method', 'con', 'show', name],
+          { encoding: 'utf8', timeout: 5000 })
+        const ipMatch     = detail.match(/^IP4\.ADDRESS\[1\]:(.+)$/m)
+        const gwMatch     = detail.match(/^IP4\.GATEWAY:(.+)$/m)
+        const dnsMatch    = detail.match(/^IP4\.DNS\[1\]:(.+)$/m)
+        const methodMatch = detail.match(/^ipv4\.method:(.+)$/m)
+        const address = ipMatch ? ipMatch[1].trim() : ''
+        const slashIdx = address.lastIndexOf('/')
+        const ip     = slashIdx >= 0 ? address.slice(0, slashIdx) : address
+        const prefix = slashIdx >= 0 ? address.slice(slashIdx + 1) : '24'
+        const method = methodMatch ? methodMatch[1].trim() : 'auto'
+        result.push({
+          connection: name,
+          device,
+          mode:    method === 'manual' ? 'manual' : 'auto',
+          address: ip     || '',
+          prefix:  prefix || '24',
+          gateway: gwMatch  ? gwMatch[1].trim().replace(/^--$/, '')  : '',
+          dns:     dnsMatch ? dnsMatch[1].trim().replace(/^--$/, '')  : ''
+        })
+      } catch { /* skip */ }
+    }
+    return result
+  } catch {
+    return []
+  }
 }
 
 function getStatus () {
@@ -605,6 +668,66 @@ function startWebAdmin () {
         }
         return { ok: true }
       })
+    }
+
+    // GET /api/network
+    if (req.method === 'GET' && url.pathname === '/api/network') {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      return res.end(JSON.stringify({ interfaces: getNetworkInterfaces() }))
+    }
+
+    // POST /api/network — apply static IP or DHCP via nmcli
+    if (req.method === 'POST' && url.pathname === '/api/network') {
+      if (process.platform !== 'linux') {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        return res.end(JSON.stringify({ error: 'Network configuration is only supported on Linux' }))
+      }
+      let raw = ''
+      req.on('data', (c) => { raw += c })
+      req.on('end', () => {
+        try {
+          const body = JSON.parse(raw)
+          const { connection, mode, address, prefix, gateway, dns } = body
+          if (!connection || typeof connection !== 'string') throw new Error('connection required')
+          if (mode !== 'auto' && mode !== 'manual') throw new Error('mode must be "auto" or "manual"')
+          const ipRe = /^(\d{1,3}\.){3}\d{1,3}$/
+          if (mode === 'auto') {
+            execFileSync('sudo', ['nmcli', 'con', 'mod', connection,
+              'ipv4.method', 'auto',
+              'ipv4.addresses', '',
+              'ipv4.gateway', '',
+              'ipv4.dns', ''])
+          } else {
+            const addr  = (address || '').trim()
+            const pref  = (prefix  || '24').toString().trim()
+            const gw    = (gateway || '').trim()
+            const dnsv  = (dns     || '').trim()
+            if (!addr) throw new Error('IP address is required for static mode')
+            if (!ipRe.test(addr)) throw new Error('invalid IP address')
+            if (gw && !ipRe.test(gw)) throw new Error('invalid gateway address')
+            const prefNum = parseInt(pref, 10)
+            if (isNaN(prefNum) || prefNum < 1 || prefNum > 32) throw new Error('prefix must be 1–32')
+            execFileSync('sudo', ['nmcli', 'con', 'mod', connection,
+              'ipv4.method', 'manual',
+              'ipv4.addresses', `${addr}/${prefNum}`,
+              'ipv4.gateway', gw,
+              'ipv4.dns', dnsv])
+          }
+          // Send response before con up (which may cause a brief disconnect)
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ok: true }))
+          execFile('sudo', ['nmcli', 'con', 'up', connection], (err) => {
+            if (err) console.error('[network] nmcli con up failed:', err.message)
+            else console.log('[network] applied connection:', connection)
+          })
+        } catch (e) {
+          if (!res.headersSent) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: e.message }))
+          }
+        }
+      })
+      return
     }
 
     res.writeHead(404, { 'Content-Type': 'text/plain' })
