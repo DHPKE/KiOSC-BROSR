@@ -47,12 +47,15 @@ function getConfigPaths () {
   ].filter(Boolean)
 }
 
+let configFilePath = null
+
 function loadConfig () {
   for (const p of getConfigPaths()) {
     if (fs.existsSync(p)) {
       try {
         const loaded = yaml.load(fs.readFileSync(p, 'utf8'))
         cfg = { ...DEFAULTS, ...loaded }
+        configFilePath = p
         console.log(`[config] loaded: ${p}`)
         return
       } catch (e) {
@@ -60,13 +63,13 @@ function loadConfig () {
       }
     }
   }
+  // No config found — use userData path for saving
+  configFilePath = getConfigPaths()[1]
   console.log('[config] using defaults')
 }
 
 function saveConfig () {
-  const paths = getConfigPaths()
-  // Prefer the userData path (always writable)
-  const p = paths[1]
+  const p = configFilePath || getConfigPaths()[1]
   fs.mkdirSync(path.dirname(p), { recursive: true })
   fs.writeFileSync(p, yaml.dump(cfg), 'utf8')
   console.log(`[config] saved: ${p}`)
@@ -120,7 +123,7 @@ function getStatus () {
 
 function navigate (url) {
   if (!url) return
-  if (cfg.test_mode) { cfg.test_mode = false; saveConfig() }
+  cfg.test_mode = false
   currentUrl = url
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(url)
   scheduleReset()
