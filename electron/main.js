@@ -252,6 +252,9 @@ function applyInputSettings () {
 function loadTestMode () {
   // Serve via the local HTTP server so file:// path-resolution and CSP
   // sandbox restrictions cannot interfere with inline scripts/styles.
+  // Cancel any pending auto-reset so it can't call navigate() and exit test mode.
+  if (resetTimer) clearTimeout(resetTimer)
+  resetTimer = null
   mainWindow.loadURL(`http://127.0.0.1:${cfg.web_port}/__testmode`)
 }
 
@@ -287,10 +290,22 @@ function applyLoginItem () {
     }
   } else {
     try {
-      // Pass the app path explicitly — required on macOS when the app may not
-      // be running from /Applications (e.g. first launch from DMG).
-      app.setLoginItemSettings({ openAtLogin: cfg.launch_at_login, path: app.getPath('exe') })
-      console.log(`[autostart] login item set: ${cfg.launch_at_login}`)
+      // On macOS 13+ Electron uses SMAppService — path is ignored; the current
+      // running bundle is registered automatically by bundle ID.
+      // On macOS ≤12 pass the .app bundle path (3 levels up from the binary).
+      const bundlePath = process.platform === 'darwin'
+        ? path.resolve(app.getPath('exe'), '../../..')
+        : app.getPath('exe')
+      app.setLoginItemSettings({ openAtLogin: cfg.launch_at_login, path: bundlePath })
+      // Verify the OS accepted the change (SMAppService silently rejects unsigned
+      // apps or apps not in /Applications).
+      const actual = app.getLoginItemSettings()
+      if (cfg.launch_at_login && !actual.openAtLogin) {
+        console.warn('[autostart] login item NOT registered — ensure the app is ' +
+          'installed in /Applications (run Install.command from the DMG).')
+      } else {
+        console.log(`[autostart] login item set: ${cfg.launch_at_login}`)
+      }
     } catch (e) {
       console.error('[autostart]', e.message)
     }
@@ -653,11 +668,13 @@ function createWindow () {
 
   currentUrl = cfg.start_url
   if (cfg.test_mode) {
+    // Don't schedule auto-reset in test mode — the timer would call navigate()
+    // and immediately exit test mode after reset_time seconds.
     loadTestMode()
   } else {
     mainWindow.loadURL(cfg.start_url)
+    scheduleReset()
   }
-  scheduleReset()
   applyWindowBehavior()
   console.log(`[window] kiosk=${useKiosk}, loading ${cfg.start_url}`)
 }
@@ -670,9 +687,68 @@ function createWindow () {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function checkMacOSAppLocation () {
-  // Disabled: Install.command in the DMG handles moving the app to /Applications
-  // and removing the quarantine xattr (required for macOS Sequoia compatibility).
-  return true
+  if (process.platform !== 'darwin') return true
+
+  const exePath    = app.getPath('exe')
+  const bundlePath = path.resolve(exePath, '../../..')   // .app bundle
+  const appName    = path.basename(bundlePath)            // KiOSC-BrowsR.app
+
+  // Allow /Applications and ~/Applications
+  const allowed = [
+    path.join('/Applications', appName),
+    path.join(os.homedir(), 'Applications', appName)
+  ]
+  if (allowed.some(p => exePath.startsWith(p + '/'))) return true
+
+  // Running from a DMG / App Translocation / arbitrary location.
+  // Offer to install to /Applications — required for login items and stable operation.
+  const { response } = await dialog.showMessageBox({
+    type:      'warning',
+    title:     'Install KiOSC-BrowsR',
+    message:   'KiOSC-BrowsR is not installed in your Applications folder.',
+    detail:    'Running directly from a DMG causes instability (crash on eject) ' +
+               'and prevents "Launch at Login" from working.\n\n' +
+               'Click Install to move the app to /Applications now.',
+    buttons:   ['Install to /Applications', 'Quit'],
+    defaultId: 0,
+    cancelId:  1
+  })
+
+  if (response === 1) { app.quit(); return false }
+
+  const dest = path.join('/Applications', appName)
+
+  try {
+    // Strip quarantine from source before copying so Gatekeeper doesn't block it
+    try { execFileSync('/usr/bin/xattr', ['-dr', 'com.apple.quarantine', bundlePath]) } catch (_) {}
+
+    // Remove old version if present
+    if (fs.existsSync(dest)) fs.rmSync(dest, { recursive: true })
+
+    // ditto preserves code signatures and resource forks (cp -R breaks them)
+    execFileSync('/usr/bin/ditto', [bundlePath, dest])
+
+    // Strip quarantine from installed copy too
+    try { execFileSync('/usr/bin/xattr', ['-dr', 'com.apple.quarantine', dest]) } catch (_) {}
+
+    console.log(`[install] moved to ${dest}`)
+  } catch (e) {
+    await dialog.showMessageBox({
+      type:    'error',
+      title:   'Install failed',
+      message: 'Could not install to /Applications: ' + e.message,
+      detail:  'Try running Install.command from the DMG manually.',
+      buttons: ['OK']
+    })
+    app.quit()
+    return false
+  }
+
+  // Relaunch from /Applications
+  const newExe = path.join(dest, 'Contents', 'MacOS', path.basename(exePath))
+  app.relaunch({ execPath: newExe })
+  app.quit()
+  return false
 }
 
 // ── App lifecycle ──────────────────────────────────────────────────────────
