@@ -34,13 +34,6 @@ mac:
     - dmg
   category: public.app-category.utilities
   darkModeSupport: true
-  # Unsigned for public distribution. Apple Development cert gives an
-  # unbypassable "damaged" error on any non-enrolled Mac. Unsigned gives
-  # "unidentified developer" which IS bypassable via right-click → Open
-  # or System Settings → Privacy & Security → Open Anyway.
-  # Install.command in the DMG strips quarantine and installs to
-  # /Applications — no prompts at all if users run that first.
-  identity: null
 
 dmg:
   # Layout of items shown in the DMG Finder window.
