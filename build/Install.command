@@ -1,7 +1,16 @@
 #!/bin/bash
 # KiOSC-BrowsR installer
-# Double-click this script inside the DMG to install on macOS Sequoia and later.
-# Right-click → Open if macOS asks for confirmation.
+#
+# HOW TO RUN THIS SCRIPT:
+#   Right-click (or Control-click) this file → Open
+#   When macOS asks "are you sure?", click Open.
+#
+# DO NOT double-click — macOS Sequoia blocks quarantined scripts with
+# a "damaged" error on double-click; right-click → Open bypasses it.
+#
+# ALTERNATIVE (Terminal):
+#   xattr -cr ~/Downloads/KiOSC-BrowsR-*.dmg
+#   Then mount the DMG and drag KiOSC-BrowsR.app to Applications.
 
 set -e
 

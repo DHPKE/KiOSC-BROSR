@@ -34,11 +34,14 @@ mac:
     - dmg
   category: public.app-category.utilities
   darkModeSupport: true
-  # Signed with the Apple Development cert in Keychain.
-  # On non-enrolled Macs, Gatekeeper shows "damaged" in the Finder open dialog,
-  # but the "Open Anyway" button DOES appear in System Settings → Privacy & Security.
-  # Alternatively, Install.command in the DMG strips the quarantine xattr and
-  # copies the app to /Applications, bypassing Gatekeeper entirely.
+  # MUST be null for public distribution.
+  # Apple Development certs are for on-device testing on enrolled Macs only.
+  # Gatekeeper rejects them with an unbypassable "damaged" error everywhere else.
+  # Unsigned apps show "unidentified developer" → bypassable via:
+  #   System Settings → Privacy & Security → Open Anyway
+  # OR: run Install.command in the DMG (right-click → Open) which strips
+  # quarantine and installs to /Applications with no further prompts.
+  identity: null
 
 dmg:
   # Layout of items shown in the DMG Finder window.
