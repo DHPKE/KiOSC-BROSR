@@ -15,8 +15,10 @@ extraResources:
 
 linux:
   target:
-    - deb
-    - AppImage
+    - target: deb
+      arch: [x64, arm64]
+    - target: AppImage
+      arch: [x64, arm64]
   category: Utility
   executableName: kiosc-browsr
   maintainer: "DHPKE <dhpke@users.noreply.github.com>"
@@ -36,9 +38,6 @@ mac:
   darkModeSupport: true
 
 dmg:
-  # Layout of items shown in the DMG Finder window.
-  # The third entry adds Install.command so users on macOS Sequoia can
-  # right-click → Open it to remove the quarantine xattr and install.
   contents:
     - x: 410
       y: 150
