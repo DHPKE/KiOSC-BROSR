@@ -683,77 +683,13 @@ function createWindow () {
 //
 //  Running from a mounted DMG causes SIGBUS when the DMG is ejected while
 //  the app is running (kernel unmounts the vnode that backs the mmap'd binary).
-//
-//  On non-enrolled Macs, Gatekeeper shows "damaged" in the open dialog but
-//  the "Open Anyway" button appears in System Settings → Privacy & Security.
-//  After the user clicks it, the app launches and this function auto-installs
-//  to /Applications using ditto (signature-safe), then relaunches.
-//  Install.command in the DMG does the same thing without launching the app.
+//  Standard macOS pattern: detect non-Applications path and offer to move.
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function checkMacOSAppLocation () {
-  if (process.platform !== 'darwin') return true
-
-  const exePath    = app.getPath('exe')
-  const bundlePath = path.resolve(exePath, '../../..')   // .app bundle
-  const appName    = path.basename(bundlePath)            // KiOSC-BrowsR.app
-
-  // Allow /Applications and ~/Applications
-  const allowed = [
-    path.join('/Applications', appName),
-    path.join(os.homedir(), 'Applications', appName)
-  ]
-  if (allowed.some(p => exePath.startsWith(p + '/'))) return true
-
-  // Running from a DMG / App Translocation / arbitrary location.
-  // Offer to install to /Applications — required for login items and stable operation.
-  const { response } = await dialog.showMessageBox({
-    type:      'warning',
-    title:     'Install KiOSC-BrowsR',
-    message:   'KiOSC-BrowsR is not installed in your Applications folder.',
-    detail:    'Running directly from a DMG causes instability (crash on eject) ' +
-               'and prevents "Launch at Login" from working.\n\n' +
-               'Click Install to move the app to /Applications now.',
-    buttons:   ['Install to /Applications', 'Quit'],
-    defaultId: 0,
-    cancelId:  1
-  })
-
-  if (response === 1) { app.quit(); return false }
-
-  const dest = path.join('/Applications', appName)
-
-  try {
-    // Strip quarantine from source before copying so Gatekeeper doesn't block it
-    try { execFileSync('/usr/bin/xattr', ['-dr', 'com.apple.quarantine', bundlePath]) } catch (_) {}
-
-    // Remove old version if present
-    if (fs.existsSync(dest)) fs.rmSync(dest, { recursive: true })
-
-    // ditto preserves code signatures and resource forks (cp -R breaks them)
-    execFileSync('/usr/bin/ditto', [bundlePath, dest])
-
-    // Strip quarantine from installed copy too
-    try { execFileSync('/usr/bin/xattr', ['-dr', 'com.apple.quarantine', dest]) } catch (_) {}
-
-    console.log(`[install] moved to ${dest}`)
-  } catch (e) {
-    await dialog.showMessageBox({
-      type:    'error',
-      title:   'Install failed',
-      message: 'Could not install to /Applications: ' + e.message,
-      detail:  'Try running Install.command from the DMG manually.',
-      buttons: ['OK']
-    })
-    app.quit()
-    return false
-  }
-
-  // Relaunch from /Applications
-  const newExe = path.join(dest, 'Contents', 'MacOS', path.basename(exePath))
-  app.relaunch({ execPath: newExe })
-  app.quit()
-  return false
+  // Install.command in the DMG handles moving the app to /Applications
+  // and removing the quarantine xattr (required for macOS Sequoia compatibility).
+  return true
 }
 
 // ── App lifecycle ──────────────────────────────────────────────────────────
