@@ -34,13 +34,11 @@ mac:
     - dmg
   category: public.app-category.utilities
   darkModeSupport: true
-  # No Developer ID cert available — produce an unsigned DMG.
-  # Apple Development certs are for on-device testing only; Gatekeeper
-  # rejects them on any non-enrolled Mac with a non-bypassable "damaged" error.
-  # Unsigned apps show a one-time "unidentified developer" warning that users
-  # can bypass via right-click → Open, or via System Settings → Privacy & Security.
-  # Install.command in the DMG removes the quarantine xattr for a cleaner install.
-  identity: null
+  # Signed with the Apple Development cert in Keychain.
+  # On non-enrolled Macs, Gatekeeper shows "damaged" in the Finder open dialog,
+  # but the "Open Anyway" button DOES appear in System Settings → Privacy & Security.
+  # Alternatively, Install.command in the DMG strips the quarantine xattr and
+  # copies the app to /Applications, bypassing Gatekeeper entirely.
 
 dmg:
   # Layout of items shown in the DMG Finder window.

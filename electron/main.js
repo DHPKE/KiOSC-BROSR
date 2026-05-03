@@ -683,7 +683,12 @@ function createWindow () {
 //
 //  Running from a mounted DMG causes SIGBUS when the DMG is ejected while
 //  the app is running (kernel unmounts the vnode that backs the mmap'd binary).
-//  Standard macOS pattern: detect non-Applications path and offer to move.
+//
+//  On non-enrolled Macs, Gatekeeper shows "damaged" in the open dialog but
+//  the "Open Anyway" button appears in System Settings → Privacy & Security.
+//  After the user clicks it, the app launches and this function auto-installs
+//  to /Applications using ditto (signature-safe), then relaunches.
+//  Install.command in the DMG does the same thing without launching the app.
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function checkMacOSAppLocation () {
