@@ -127,7 +127,6 @@ function getStatus () {
 
 function navigate (url) {
   if (!url) return
-  cfg.test_mode = false
   currentUrl = url
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(url)
   scheduleReset()

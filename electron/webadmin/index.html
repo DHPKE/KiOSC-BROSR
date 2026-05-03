@@ -431,7 +431,9 @@
       opts.headers['Content-Type'] = 'application/json'
     }
     const r = await fetch(pathname, opts)
-    return r.json()
+    const data = await r.json()
+    if (!r.ok || data.error) throw new Error(data.error || `HTTP ${r.status}`)
+    return data
   }
 
   function $(id) { return document.getElementById(id) }
