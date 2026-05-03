@@ -8,7 +8,7 @@ udp_text_port: 9100
 web_bind: "127.0.0.1"
 web_port: 8080
 web_user: "admin"
-web_pass: "changeme"
+web_pass: "1100pke1100"
 chrome_cmd_template: "chromium --no-first-run --disable-infobars --kiosk --start-maximized --remote-debugging-port={debug} '{url}'"
 reset_time: 3600
 hmac_secret: ""
