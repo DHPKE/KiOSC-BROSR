@@ -266,6 +266,42 @@
     .seg { background:none; border:none; color:var(--muted); padding:6px 20px; cursor:pointer; font-size:0.85rem; }
     .seg.active { background:var(--accent); color:#111; font-weight:600; }
     .net-hint { margin-top:10px; font-size:0.8rem; color:var(--muted); min-height:1.2em; }
+
+    /* Scheduler card */
+    .sched-list { margin-bottom:14px; }
+    .sched-entry {
+      background: var(--bg); border:1px solid var(--border); border-radius:8px;
+      padding:12px 14px; margin-bottom:8px;
+    }
+    .sched-entry-header {
+      display:flex; align-items:center; gap:10px; margin-bottom:10px;
+    }
+    .sched-entry-header .sched-idx {
+      font-size:0.72rem; color:var(--muted); text-transform:uppercase;
+      letter-spacing:.5px; flex:1;
+    }
+    .sched-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
+    .sched-row label { font-size:0.78rem; color:var(--muted); width:64px; flex-shrink:0; }
+    .sched-row input[type="time"], .sched-row select {
+      background:var(--bg); border:1px solid var(--border);
+      color:var(--text); padding:6px 10px; border-radius:6px; font-size:0.88rem;
+    }
+    .sched-row input[type="time"]:focus, .sched-row select:focus { outline:none; border-color:var(--accent2); }
+    .day-pills { display:flex; gap:4px; flex-wrap:wrap; }
+    .day-pill {
+      background:var(--border); color:var(--muted); border:none;
+      border-radius:4px; padding:4px 9px; font-size:0.78rem; cursor:pointer;
+    }
+    .day-pill.on { background:var(--accent2); color:#111; font-weight:600; }
+    .btn-del { background:none; border:1px solid rgba(248,113,113,0.3);
+      color:var(--danger); border-radius:5px; padding:3px 10px;
+      font-size:0.75rem; cursor:pointer; }
+    .btn-del:hover { background:rgba(248,113,113,0.1); }
+    .sched-empty { color:var(--muted); font-size:0.85rem; padding:8px 0; }
+    .ntp-row { display:flex; align-items:center; gap:8px; margin-top:14px; }
+    .ntp-row label { font-size:0.78rem; color:var(--muted); white-space:nowrap; }
+    .ntp-row input { flex:1; }
+    .ntp-row .btn { flex-shrink:0; }
   </style>
 </head>
 <body>
@@ -333,6 +369,23 @@
       <button class="btn btn-secondary" onclick="cmd('home')">Home</button>
       <button class="btn btn-secondary" onclick="cmd('stop')">Stop</button>
       <button class="btn btn-danger"    onclick="cmd('clear')">Clear Cache</button>
+    </div>
+  </div>
+
+  <!-- ── Reload Scheduler + NTP card ────────────────────────────── -->
+  <div class="card">
+    <h2>Reload Scheduler</h2>
+    <div class="sched-list" id="sched-list"><p class="sched-empty">No schedules yet.</p></div>
+    <button class="btn btn-secondary" style="width:100%;margin-bottom:4px" onclick="addSchedule()">+ Add schedule</button>
+
+    <h2 style="margin-top:20px">NTP Time Sync</h2>
+    <div class="ntp-row">
+      <label>NTP server</label>
+      <input type="text" id="cfg-ntp" placeholder="pool.ntp.org" autocomplete="off">
+    </div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button class="btn btn-primary" style="flex:1" onclick="saveSchedulerNtp()">Save</button>
+      <button class="btn btn-secondary" onclick="syncNtpNow()" title="Sync now">Sync now</button>
     </div>
   </div>
 
@@ -554,6 +607,8 @@
       $('cfg-start-url').value  = c.start_url  || ''
       $('cfg-reset-time').value = c.reset_time != null ? c.reset_time : 3600
       $('cfg-mdns-name').value  = c.mdns_name  || ''
+      $('cfg-ntp').value        = c.ntp_server || ''
+      renderSchedules(c.reload_schedules || [])
     } catch (e) { /* ignore */ }
   }
 
@@ -665,6 +720,107 @@
       setTimeout(loadNetwork, 3000)
     } catch (e) {
       toast('Network error: ' + e.message)
+    }
+  }
+
+  // ── Reload Scheduler + NTP ─────────────────────────────────────────────
+  const DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+  let schedules = []
+
+  function renderSchedules (list) {
+    schedules = list.map(e => ({ ...e }))  // deep copy
+    const container = $('sched-list')
+    if (!schedules.length) {
+      container.innerHTML = '<p class="sched-empty">No schedules yet.</p>'
+      return
+    }
+    container.innerHTML = schedules.map((entry, idx) => {
+      const dayPills = DAY_NAMES.map((d, di) => {
+        const on = (entry.days || []).includes(di) ? ' on' : ''
+        return `<button class="day-pill${on}" onclick="toggleDay(${idx},${di})">${d}</button>`
+      }).join('')
+      return `
+      <div class="sched-entry" id="sched-${idx}">
+        <div class="sched-entry-header">
+          <span class="sched-idx">Schedule ${idx + 1}</span>
+          <label class="switch" title="Enable/disable">
+            <input type="checkbox" ${entry.enabled ? 'checked' : ''} onchange="toggleSchedEnabled(${idx},this.checked)">
+            <span class="knob"></span>
+          </label>
+          <button class="btn-del" onclick="deleteSchedule(${idx})">Remove</button>
+        </div>
+        <div class="sched-row">
+          <label>Time</label>
+          <input type="time" value="${esc(entry.time||'08:00')}" onchange="updateSchedField(${idx},'time',this.value)">
+          <select onchange="updateSchedField(${idx},'type',this.value)">
+            <option value="daily"  ${entry.type==='daily'  ?'selected':''}>Daily</option>
+            <option value="weekly" ${entry.type==='weekly' ?'selected':''}>Weekly</option>
+          </select>
+        </div>
+        <div class="sched-row" id="sched-days-${idx}" style="${entry.type==='weekly'?'':'display:none'}">
+          <label>Days</label>
+          <div class="day-pills">${dayPills}</div>
+        </div>
+      </div>`
+    }).join('')
+  }
+
+  function addSchedule () {
+    schedules.push({ enabled: true, time: '08:00', type: 'daily', days: [1,2,3,4,5] })
+    renderSchedules(schedules)
+  }
+
+  function deleteSchedule (idx) {
+    schedules.splice(idx, 1)
+    renderSchedules(schedules)
+  }
+
+  function toggleSchedEnabled (idx, val) {
+    schedules[idx].enabled = val
+  }
+
+  function updateSchedField (idx, key, val) {
+    schedules[idx][key] = val
+    if (key === 'type') {
+      const daysRow = $(`sched-days-${idx}`)
+      if (daysRow) daysRow.style.display = val === 'weekly' ? '' : 'none'
+    }
+  }
+
+  function toggleDay (idx, day) {
+    const days = schedules[idx].days || []
+    const pos = days.indexOf(day)
+    if (pos >= 0) days.splice(pos, 1); else days.push(day)
+    schedules[idx].days = days
+    // Re-render just the day pills row
+    const container = $(`sched-days-${idx}`)
+    if (!container) return
+    const pillsDiv = container.querySelector('.day-pills')
+    if (!pillsDiv) return
+    pillsDiv.innerHTML = DAY_NAMES.map((d, di) => {
+      const on = days.includes(di) ? ' on' : ''
+      return `<button class="day-pill${on}" onclick="toggleDay(${idx},${di})">${d}</button>`
+    }).join('')
+  }
+
+  async function saveSchedulerNtp () {
+    try {
+      await apiFetch('POST', '/api/config', {
+        ntp_server:       $('cfg-ntp').value.trim(),
+        reload_schedules: schedules
+      })
+      toast('Scheduler & NTP saved')
+    } catch (e) {
+      toast('Save failed: ' + e.message)
+    }
+  }
+
+  async function syncNtpNow () {
+    try {
+      await apiFetch('POST', '/api/command', { cmd: 'sync_ntp' })
+      toast('NTP sync triggered')
+    } catch (e) {
+      toast('Sync failed: ' + e.message)
     }
   }
 

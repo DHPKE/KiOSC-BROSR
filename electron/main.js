@@ -34,7 +34,11 @@ const DEFAULTS = {
   disable_keyboard: false,
   test_mode:        false,
   always_on_top:    false,
-  launch_at_login:  false
+  launch_at_login:  false,
+  ntp_server:       '',
+  reload_schedules: []
+  // reload_schedules entries: { enabled, time: 'HH:MM', days: [0-6], type: 'daily'|'weekly' }
+  // days: 0=Sun,1=Mon,...,6=Sat
 }
 
 let cfg = { ...DEFAULTS }
@@ -89,6 +93,8 @@ let resetTimer      = null
 let currentUrl      = null
 let keyboardBlocker      = null
 let blurRefocusHandler   = null
+let scheduleTimer        = null  // fires every minute to check reload_schedules
+let ntpTimer             = null  // periodic NTP sync
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -182,7 +188,9 @@ function getStatus () {
     disable_keyboard: cfg.disable_keyboard,
     test_mode:        cfg.test_mode,
     always_on_top:    cfg.always_on_top,
-    launch_at_login:  cfg.launch_at_login
+    launch_at_login:  cfg.launch_at_login,
+    ntp_server:       cfg.ntp_server,
+    reload_schedules: cfg.reload_schedules || []
   }
 }
 
@@ -218,6 +226,101 @@ function scheduleReset () {
       navigate(cfg.start_url)
     }, cfg.reset_time * 1000)
   }
+}
+
+// ── NTP sync ───────────────────────────────────────────────────────────────
+
+/**
+ * Sync system time from an NTP server.
+ * On Linux: uses `ntpdate -u` (falls back to `sntp` if not available).
+ * On macOS: uses `sntp` (bundled with macOS).
+ * On Windows: uses `w32tm /resync`.
+ * A non-zero exit is logged but does not throw.
+ */
+function syncNtp (server) {
+  if (!server || typeof server !== 'string') return
+  const host = server.trim()
+  if (!host) return
+  console.log(`[ntp] syncing from ${host}`)
+  let cmd, args
+  if (process.platform === 'win32') {
+    cmd = 'w32tm'
+    args = ['/resync', '/force']
+  } else if (process.platform === 'darwin') {
+    cmd = 'sntp'
+    args = ['-sS', host]
+  } else {
+    // Linux — prefer ntpdate, fall back to sntp
+    try {
+      execFileSync('which', ['ntpdate'], { stdio: 'ignore' })
+      cmd = 'ntpdate'
+      args = ['-u', host]
+    } catch {
+      cmd = 'sntp'
+      args = ['-sS', host]
+    }
+  }
+  execFile(cmd, args, { timeout: 10000 }, (err, stdout, stderr) => {
+    if (err) console.warn(`[ntp] sync failed: ${err.message}`)
+    else     console.log(`[ntp] synced OK`)
+  })
+}
+
+function startNtpSync () {
+  if (ntpTimer) clearInterval(ntpTimer)
+  ntpTimer = null
+  if (!cfg.ntp_server) return
+  // Sync immediately, then every hour
+  syncNtp(cfg.ntp_server)
+  ntpTimer = setInterval(() => syncNtp(cfg.ntp_server), 60 * 60 * 1000)
+}
+
+// ── Reload scheduler ───────────────────────────────────────────────────────
+
+/**
+ * Returns true if a schedule entry should fire at the given Date.
+ * type 'daily'  → fires every day at the specified time.
+ * type 'weekly' → fires on the specified days of the week (days array, 0=Sun).
+ */
+function scheduleMatchesNow (entry, now) {
+  if (!entry.enabled) return false
+  const [hStr, mStr] = (entry.time || '').split(':')
+  const h = parseInt(hStr, 10)
+  const m = parseInt(mStr, 10)
+  if (isNaN(h) || isNaN(m)) return false
+  if (now.getHours() !== h || now.getMinutes() !== m) return false
+  if (entry.type === 'weekly') {
+    const days = Array.isArray(entry.days) ? entry.days : []
+    return days.includes(now.getDay())
+  }
+  // 'daily' — matches any day
+  return true
+}
+
+function tickScheduler () {
+  if (!cfg.reload_schedules || !cfg.reload_schedules.length) return
+  const now = new Date()
+  for (const entry of cfg.reload_schedules) {
+    if (scheduleMatchesNow(entry, now)) {
+      console.log(`[scheduler] reload triggered by schedule: ${entry.time} type=${entry.type}`)
+      reload()
+      break  // only one reload per minute tick
+    }
+  }
+}
+
+function startScheduler () {
+  if (scheduleTimer) clearInterval(scheduleTimer)
+  scheduleTimer = null
+  if (!cfg.reload_schedules || !cfg.reload_schedules.length) return
+  // Align timer to fire at the start of each minute
+  const now = new Date()
+  const msUntilNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds()
+  setTimeout(() => {
+    tickScheduler()
+    scheduleTimer = setInterval(tickScheduler, 60 * 1000)
+  }, msUntilNextMinute)
+  console.log('[scheduler] started, next tick in', Math.round(msUntilNextMinute / 1000), 's')
 }
 
 // ── Input / Display helpers ────────────────────────────────────────────────
@@ -455,6 +558,9 @@ function dispatch (cmd, params = {}) {
     case 'restart_app':
       restartApp()
       break
+    case 'sync_ntp':
+      if (cfg.ntp_server) syncNtp(cfg.ntp_server)
+      break
     case 'always_on_top':
       cfg.always_on_top = parseBool(params.value)
       applyWindowBehavior()
@@ -651,9 +757,12 @@ function startWebAdmin () {
       return readBody(req, res, (body) => {
         const editable = ['start_url', 'reset_time', 'mdns_name', 'kiosk',
                           'hide_cursor', 'disable_touch', 'disable_keyboard', 'test_mode',
-                          'always_on_top', 'launch_at_login']
+                          'always_on_top', 'launch_at_login',
+                          'ntp_server', 'reload_schedules']
         const prevTestMode      = cfg.test_mode
         const prevLaunchAtLogin = cfg.launch_at_login
+        const prevNtpServer     = cfg.ntp_server
+        const prevSchedules     = JSON.stringify(cfg.reload_schedules)
         for (const k of editable) {
           if (k in body) cfg[k] = body[k]
         }
@@ -661,6 +770,8 @@ function startWebAdmin () {
         applyInputSettings()
         applyWindowBehavior()
         if (cfg.launch_at_login !== prevLaunchAtLogin) applyLoginItem()
+        if (cfg.ntp_server !== prevNtpServer) startNtpSync()
+        if (JSON.stringify(cfg.reload_schedules) !== prevSchedules) startScheduler()
         if (cfg.test_mode && !prevTestMode) {
           if (mainWindow && !mainWindow.isDestroyed()) loadTestMode()
         } else if (!cfg.test_mode && prevTestMode) {
@@ -830,6 +941,8 @@ app.whenReady().then(async () => {
   startOsc()
   startUdp()
   startMdns()
+  startNtpSync()
+  startScheduler()
   await startWebAdmin()
   if (cfg.autostart) createWindow()
 })
@@ -843,9 +956,11 @@ app.on('activate', () => {
 })
 
 app.on('before-quit', () => {
-  if (resetTimer) clearTimeout(resetTimer)
-  if (oscServer)  oscServer.close()
-  if (udpSock)    udpSock.close()
-  if (bonjour)    bonjour.destroy()
+  if (resetTimer)    clearTimeout(resetTimer)
+  if (scheduleTimer) clearInterval(scheduleTimer)
+  if (ntpTimer)      clearInterval(ntpTimer)
+  if (oscServer)     oscServer.close()
+  if (udpSock)       udpSock.close()
+  if (bonjour)       bonjour.destroy()
   console.log('[app] exit')
 })
