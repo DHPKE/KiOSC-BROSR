@@ -49,6 +49,10 @@ function getConfigPaths () {
 
 let configFilePath = null
 
+function userDataConfigPath () {
+  return path.join(app.getPath('userData'), 'config.yaml')
+}
+
 function loadConfig () {
   for (const p of getConfigPaths()) {
     if (fs.existsSync(p)) {
@@ -63,13 +67,13 @@ function loadConfig () {
       }
     }
   }
-  // No config found — use userData path for saving
-  configFilePath = getConfigPaths()[1]
+  // No config found — always write to userData (writable without root)
+  configFilePath = userDataConfigPath()
   console.log('[config] using defaults')
 }
 
 function saveConfig () {
-  const p = configFilePath || getConfigPaths()[1]
+  const p = configFilePath || userDataConfigPath()
   fs.mkdirSync(path.dirname(p), { recursive: true })
   fs.writeFileSync(p, yaml.dump(cfg), 'utf8')
   console.log(`[config] saved: ${p}`)
